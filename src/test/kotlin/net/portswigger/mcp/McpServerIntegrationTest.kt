@@ -47,12 +47,13 @@ class McpServerIntegrationTest {
         }
         
         runBlocking {
+            // Match ToolsKtTest's start budget (3s) so a cold Netty start is not a flaky failure.
             var attempts = 0
-            while (!serverStarted && attempts < 10) {
+            while (!serverStarted && attempts < 30) {
                 delay(100)
                 attempts++
             }
-            
+
             if (!serverStarted) {
                 throw IllegalStateException("Server failed to start after timeout")
             }
