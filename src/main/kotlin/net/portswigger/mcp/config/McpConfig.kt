@@ -50,6 +50,12 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
 
     var filterConfigCredentials by storage.boolean(true)
 
+    // Blinder LEAK-2 policy toggle. Default false = IP addresses are not masked (prior behaviour).
+    var maskIpAddresses by storage.boolean(false)
+
+    // Blinder policy toggle. Default false = UUID identifiers are not masked (readable for analysis).
+    var maskUuids by storage.boolean(false)
+
     private var _autoApproveTargets by storage.stringList("")
     private val targetsChangeListeners = CopyOnWriteArrayList<ListenerRegistration>()
     private val dataAccessChangeListeners = CopyOnWriteArrayList<ListenerRegistration>()

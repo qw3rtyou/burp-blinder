@@ -42,7 +42,7 @@ inline fun <reified I : Any> Server.mcpTool(
         }
     }
 
-    addTool(name = toolName, description = description, inputSchema = inputSchema, handler = handler)
+    addGatewayTool(name = toolName, description = description, inputSchema = inputSchema, handler = handler)
 }
 
 @OptIn(ExperimentalTypeInference::class)
@@ -119,7 +119,7 @@ inline fun Server.mcpTool(
     val handler: suspend (ClientConnection, CallToolRequest) -> CallToolResult = { _, _ ->
         CallToolResult(content = execute(), isError = false)
     }
-    addTool(name = name, description = description, inputSchema = ToolSchema(), handler = handler)
+    addGatewayTool(name = name, description = description, inputSchema = ToolSchema(), handler = handler)
 }
 
 inline fun Server.mcpTool(
@@ -130,7 +130,7 @@ inline fun Server.mcpTool(
     val handler: suspend (ClientConnection, CallToolRequest) -> CallToolResult = { _, _ ->
         CallToolResult(content = listOf(TextContent(execute())), isError = false)
     }
-    addTool(name = name, description = description, inputSchema = ToolSchema(), handler = handler)
+    addGatewayTool(name = name, description = description, inputSchema = ToolSchema(), handler = handler)
 }
 
 fun String.toLowerSnakeCase(): String {
