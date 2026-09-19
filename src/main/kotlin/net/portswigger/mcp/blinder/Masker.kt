@@ -127,6 +127,7 @@ class Masker(
         text = maskJsonSensitiveValues(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
+        text = maskEncodedEmails(text)
         text = maskCards(text)
         text = maskSsn(text)
         text = maskPhones(text)
@@ -340,6 +341,13 @@ class Masker(
             if (overlaps || scpSyntax) m.value else vault.placeholderFor(m.value, TokenType.EMAIL)
         }
     }
+
+    // Percent-encoded emails (`alice%40corp.com`) in raw query/URL values. Masked with a URL chain
+    // so the placeholder is the same identity as the decoded email and rehydration restores `%40`.
+    private fun maskEncodedEmails(text: String) =
+        replaceOutsidePlaceholders(text, SecretDetector.EMAIL_ENCODED, jwtRanges(text)) { encoded ->
+            maskLiteral(encoded, listOf(Encoding.URL), TokenType.EMAIL)
+        }
 
     // Phone numbers (PII), masked by default like emails; raw context, referentially consistent.
     private fun maskPhones(text: String) = replaceOutsidePlaceholders(text, SecretDetector.PHONE, jwtRanges(text)) { phone ->

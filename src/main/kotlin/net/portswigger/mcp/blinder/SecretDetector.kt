@@ -12,6 +12,11 @@ object SecretDetector {
     // Shape-based patterns.
     val EMAIL = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
+    // Percent-encoded email (the `@` written as `%40`), which appears in raw query strings / URL
+    // values and slips past the plain EMAIL regex. Masked with a URL encoding context so it stays
+    // reference-consistent with the decoded form and round-trips byte-exactly.
+    val EMAIL_ENCODED = Regex("""[A-Za-z0-9._%+\-]+%40[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""", RegexOption.IGNORE_CASE)
+
     // JWT: three base64url segments, header starts with eyJ (`{"`).
     val JWT = Regex("""eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+""")
 
