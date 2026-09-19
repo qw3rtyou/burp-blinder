@@ -57,8 +57,9 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
     // Blinder policy toggle. Default false = UUID identifiers are not masked (readable for analysis).
     var maskUuids by storage.boolean(false)
 
-    // Blinder masking mode (OFF/SELECTIVE/STRICT), persisted by name. Default SELECTIVE.
-    private var maskingModeName by storage.string(MaskingMode.SELECTIVE.name)
+    // Blinder masking mode (OFF/SELECTIVE/STRICT), persisted by name. Default STRICT: an honest
+    // conceal-by-default posture for a security-critical tool (reveal is the escape hatch).
+    private var maskingModeName by storage.string(MaskingMode.STRICT.name)
     var maskingMode: MaskingMode
         get() = MaskingMode.fromNameOrDefault(maskingModeName)
         set(value) {

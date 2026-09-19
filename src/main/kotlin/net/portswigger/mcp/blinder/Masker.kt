@@ -155,7 +155,9 @@ class Masker(
     // IP masking (LEAK-2), gated by the maskIpAddresses toggle. Raw context, referentially
     // consistent, so the same address always maps to the same placeholder and round-trips exactly.
     private fun maskIps(text: String): String {
-        var out = replaceOutsidePlaceholders(text, SecretDetector.IPV6, jwtRanges(text)) { ip ->
+        // Protect clock times so the IPv6 matcher does not swallow `HH:MM:SS` (e.g. Date headers).
+        val timeRanges = timePattern.findAll(text).map { it.range }.toList()
+        var out = replaceOutsidePlaceholders(text, SecretDetector.IPV6, jwtRanges(text) + timeRanges) { ip ->
             vault.placeholderFor(ip, TokenType.IP)
         }
         out = replaceOutsidePlaceholders(out, SecretDetector.IPV4, jwtRanges(out)) { ip ->
@@ -351,22 +353,53 @@ class Masker(
     // whole via the '=' separator.
     private val isolatedToken = Regex("""(?<![A-Za-z0-9+/_\-])[A-Za-z0-9+/_\-]{20,}={0,2}(?![A-Za-z0-9+/_\-])""")
 
-    // STRICT: lower floor and mask every candidate (over-masking accepted) — catches low-shape/low-
-    // entropy values that SELECTIVE deliberately leaves readable.
-    private val strictToken = Regex("""(?<![A-Za-z0-9+/_\-])[A-Za-z0-9+/_\-]{10,}={0,2}(?![A-Za-z0-9+/_\-])""")
+    // STRICT: lower floor (12) and mask value tokens aggressively — but preserve request/response
+    // STRUCTURE, standard non-sensitive metadata values, timestamps and the Burp tool-output
+    // envelope so the agent can still read the shape of traffic. "Conceal the values, keep the
+    // structure."
+    private val strictToken = Regex("""(?<![A-Za-z0-9+/_\-])[A-Za-z0-9+/_\-]{12,}={0,2}(?![A-Za-z0-9+/_\-])""")
 
     // Position exclusions: an HTTP header field-name token (line start, before ':') and a JSON
     // object key are structural, never secret values. Masking only applies to VALUE positions.
     private val headerFieldName = Regex("""(?im)^([A-Za-z0-9._-]+)[ \t]*:""")
     private val jsonKey = Regex("""["']([A-Za-z0-9_.\-]+)["']\s*:""")
 
+    // Standard headers whose VALUES are non-sensitive metadata (kept readable even in STRICT).
+    private val metadataHeaderValue = Regex(
+        """(?im)^(?:content-type|content-length|content-encoding|content-language|content-disposition|""" +
+            """transfer-encoding|connection|keep-alive|date|server|cache-control|pragma|accept|""" +
+            """accept-encoding|accept-language|accept-charset|accept-ranges|vary|allow|age|expires|""" +
+            """retry-after|x-powered-by|last-modified|via|upgrade|x-content-type-options|""" +
+            """x-frame-options|x-xss-protection|strict-transport-security):[ \t]*(.+?)[ \t]*$"""
+    )
+
+    // Clock times HH:MM:SS (valid ranges) — structural metadata, and must not be eaten by the IPv6
+    // or high-entropy passes (e.g. inside a Date header).
+    private val timePattern = Regex("""\b(?:[01]?\d|2[0-3]):[0-5]\d:[0-5]\d\b""")
+
+    // Burp tool-output envelope literals (wrappers around the actual HTTP content, not traffic data).
+    private val envelopeWords = setOf(
+        "HttpRequestResponse", "HttpRequest", "HttpResponse", "HttpRequestResponses",
+        "messageAnnotations", "MessageAnnotations", "highlightColor", "HighlightColor",
+        "annotations", "Annotations", "requestResponse", "requestResponses",
+        "serialException", "StatusCodeClass", "notesFieldName"
+    )
+
     private fun maskHighEntropy(text: String): String {
         // Protect (a) JWT analysis-view segments (FAIL-1), (b) header field names and JSON keys
-        // (they are structural identifiers, not values), and (c) UUIDs when the UUID toggle is off.
-        val protected = jwtRanges(text) +
+        // (structural identifiers, not values), and (c) UUIDs when the UUID toggle is off.
+        var protected = jwtRanges(text) +
                 headerFieldName.findAll(text).map { it.groups[1]!!.range } +
                 jsonKey.findAll(text).map { it.groups[1]!!.range } +
                 if (!maskUuids) SecretDetector.UUID.findAll(text).map { it.range }.toList() else emptyList()
+
+        if (strict) {
+            // Keep the request/response STRUCTURE readable: standard non-sensitive metadata header
+            // values and clock times are not values-to-conceal.
+            protected = protected +
+                    metadataHeaderValue.findAll(text).map { it.groups[1]!!.range } +
+                    timePattern.findAll(text).map { it.range }
+        }
 
         val regex = if (strict) strictToken else isolatedToken
         return replaceOutsidePlaceholders(text, regex, protectedRanges = protected) { token ->
@@ -374,8 +407,10 @@ class Masker(
                 // A base64 blob that already carries masked placeholders was handled by the nested
                 // pass; do not clobber it (that would break structural rehydration).
                 isNestedMaskedBlob(token) -> token
-                // STRICT masks any candidate (over-masking accepted); SELECTIVE uses the precision gate.
-                strict -> vault.placeholderFor(token, TokenType.SECRET)
+                // STRICT conceals values but keeps structure: never mask separator-joined structural
+                // identifiers (application/json, snake_case) nor the Burp output envelope literals.
+                strict -> if (SecretDetector.STRUCTURAL_IDENTIFIER.matches(token) || token in envelopeWords)
+                    token else vault.placeholderFor(token, TokenType.SECRET)
                 isMaskableSecret(token) -> vault.placeholderFor(token, TokenType.SECRET)
                 else -> token
             }

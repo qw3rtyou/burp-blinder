@@ -59,13 +59,15 @@ class MaskingModeTest {
     }
 
     @Test
-    fun `STRICT masks low-shape tokens that SELECTIVE leaves readable`() {
-        val value = "abcdefghijkl" // 12 chars, low entropy — below SELECTIVE's 20-floor
+    fun `STRICT masks identifying values that SELECTIVE leaves readable`() {
+        // 14 chars, mixed alnum: below SELECTIVE's 20-floor (readable) but an identifying value that
+        // STRICT (floor 12, non-structural) conceals. Pure-alpha dictionary words remain structure.
+        val value = "aZ9qP2xL7mK3nB"
         val selective = Masker(Vault(), mode = MaskingMode.SELECTIVE).mask("""{"custom":"$value"}""")
-        assertTrue(selective.contains(value), "SELECTIVE should leave low-shape readable: $selective")
+        assertTrue(selective.contains(value), "SELECTIVE should leave sub-floor value readable: $selective")
 
         val strict = Masker(Vault(), mode = MaskingMode.STRICT).mask("""{"custom":"$value"}""")
-        assertFalse(strict.contains(value), "STRICT should mask low-shape: $strict")
+        assertFalse(strict.contains(value), "STRICT should mask identifying value: $strict")
         assertTrue(strict.contains("{{SECRET_1}}"), strict)
     }
 
