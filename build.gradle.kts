@@ -14,7 +14,7 @@ abstract class EmbedProxyJarTask : DefaultTask() {
 
     @TaskAction
     fun embedJar() {
-        // shadowJarFile is the already-published final jar (build/libs/burp-mcp-all.jar).
+        // shadowJarFile is the already-published final jar (build/libs/burp-blinder-all.jar).
         val finalJar = shadowJarFile.get().asFile
         val libsDir = projectDir.dir("libs").get().asFile
         val proxyJarFile = File(libsDir, "mcp-proxy-all.jar")
@@ -25,7 +25,7 @@ abstract class EmbedProxyJarTask : DefaultTask() {
 
         // Embed into a private copy, then atomically swap it into place so the watcher only ever
         // sees a complete jar (never the in-progress `jar uf`).
-        val embedTmp = File(finalJar.parentFile, ".burp-mcp-all.jar.embed.tmp")
+        val embedTmp = File(finalJar.parentFile, ".burp-blinder-all.jar.embed.tmp")
         Files.copy(finalJar.toPath(), embedTmp.toPath(), StandardCopyOption.REPLACE_EXISTING)
 
         execOperations.exec {
@@ -114,9 +114,9 @@ tasks {
 
     shadowJar {
         archiveClassifier.set("")
-        // Write to a hidden temp, then atomically publish to burp-mcp-all.jar in doLast so the
+        // Write to a hidden temp, then atomically publish to burp-blinder-all.jar in doLast so the
         // user's auto-reload watcher never sees a half-written jar. Final filename is unchanged.
-        archiveFileName.set(".burp-mcp-all.jar.tmp")
+        archiveFileName.set(".burp-blinder-all.jar.tmp")
         mergeServiceFiles()
 
         manifest {
@@ -149,8 +149,8 @@ tasks {
 
         // Resolve paths at configuration time (plain File, config-cache safe) so the doLast closure
         // captures no project/script references.
-        val tmpJar = layout.buildDirectory.file("libs/.burp-mcp-all.jar.tmp").get().asFile
-        val finalJar = layout.buildDirectory.file("libs/burp-mcp-all.jar").get().asFile
+        val tmpJar = layout.buildDirectory.file("libs/.burp-blinder-all.jar.tmp").get().asFile
+        val finalJar = layout.buildDirectory.file("libs/burp-blinder-all.jar").get().asFile
         doLast {
             try {
                 Files.move(tmpJar.toPath(), finalJar.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
@@ -171,7 +171,7 @@ tasks {
         // (and `build`) validate cleanly instead of failing on an implicit task dependency.
         mustRunAfter("test", "compileTestKotlin", "processTestResources")
         // shadowJar publishes the final jar atomically in its doLast; embed operates on that.
-        shadowJarFile.set(layout.buildDirectory.file("libs/burp-mcp-all.jar"))
+        shadowJarFile.set(layout.buildDirectory.file("libs/burp-blinder-all.jar"))
         projectDir.set(layout.projectDirectory)
     }
 
