@@ -403,19 +403,51 @@ class Masker(
         }
 
         val regex = if (strict) strictToken else isolatedToken
-        return replaceOutsidePlaceholders(text, regex, protectedRanges = protected) { token ->
-            when {
-                // A base64 blob that already carries masked placeholders was handled by the nested
-                // pass; do not clobber it (that would break structural rehydration).
-                isNestedMaskedBlob(token) -> token
-                // STRICT conceals values but keeps structure: never mask separator-joined structural
-                // identifiers (application/json, snake_case) nor the Burp output envelope literals.
-                strict -> if (SecretDetector.STRUCTURAL_IDENTIFIER.matches(token) || token in envelopeWords)
-                    token else vault.placeholderFor(token, TokenType.SECRET)
-                isMaskableSecret(token) -> vault.placeholderFor(token, TokenType.SECRET)
-                else -> token
-            }
+        val skip = Placeholder.parseAll(text).map { it.range } + protected
+        return regex.replace(text) { m ->
+            if (skip.any { it.first <= m.range.last && m.range.first <= it.last }) return@replace m.value
+            val token = m.value
+            // URL/path context: the token starts a path or follows a domain dot / path slash. There we
+            // respect `/` segment boundaries so a sensitive segment does not drag readable path words
+            // (bbc.co.uk/news/articles/<id>) into one placeholder.
+            val before = text.getOrNull(m.range.first - 1)
+            val isUrlPath = token.startsWith("/") || before == '.' || before == '/'
+            maskEntropyCandidate(token, isUrlPath)
         }
+    }
+
+    private fun maskEntropyCandidate(token: String, isUrlPath: Boolean): String = when {
+        // A base64 blob already carrying masked placeholders was handled by the nested pass.
+        isNestedMaskedBlob(token) -> token
+        // In URL/path context, mask per `/`-segment (keep structure, conceal sensitive segments).
+        isUrlPath && token.contains('/') -> token.split('/').joinToString("/") { seg -> maskPathSegment(seg) }
+        // STRICT conceals values but keeps structure: never mask separator-joined structural
+        // identifiers (application/json, snake_case) nor the Burp output envelope literals.
+        strict -> if (SecretDetector.STRUCTURAL_IDENTIFIER.matches(token) || token in envelopeWords)
+            token else vault.placeholderFor(token, TokenType.SECRET)
+        isMaskableSecret(token) -> vault.placeholderFor(token, TokenType.SECRET)
+        else -> token
+    }
+
+    private fun maskPathSegment(seg: String): String = when {
+        seg.isEmpty() -> seg
+        // Pure-alpha path words (news, articles, PortSwigger, mcp-server) are structure — keep them.
+        SecretDetector.STRUCTURAL_IDENTIFIER.matches(seg) -> seg
+        seg in envelopeWords -> seg
+        // STRICT conceals every non-structural path segment; SELECTIVE only the sensitive ones.
+        strict -> vault.placeholderFor(seg, TokenType.SECRET)
+        isPathSegmentSecret(seg) -> vault.placeholderFor(seg, TokenType.SECRET)
+        else -> seg
+    }
+
+    /** A path segment worth masking in SELECTIVE: a mixed alnum id/secret, or a strong high-entropy run. */
+    private fun isPathSegmentSecret(seg: String): Boolean {
+        if (SecretDetector.STRUCTURAL_IDENTIFIER.matches(seg)) return false
+        val hasLetter = seg.any { it.isLetter() }
+        val hasDigit = seg.any { it.isDigit() }
+        if (hasLetter && hasDigit && seg.length >= 8) return true            // e.g. cx2gx8n8e5po, ghp_16C...
+        if (seg.length >= 20 && SecretDetector.isHighEntropySecret(seg)) return true
+        return isMaskableSecret(seg)
     }
 
     // Segment classifiers used to tell a separator-joined identifier apart from a secret.
