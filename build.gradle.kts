@@ -1,4 +1,6 @@
 import java.time.Instant
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 abstract class EmbedProxyJarTask : DefaultTask() {
     @get:InputFile
@@ -12,7 +14,8 @@ abstract class EmbedProxyJarTask : DefaultTask() {
 
     @TaskAction
     fun embedJar() {
-        val shadowJar = shadowJarFile.get().asFile
+        // shadowJarFile is the already-published final jar (build/libs/burp-mcp-all.jar).
+        val finalJar = shadowJarFile.get().asFile
         val libsDir = projectDir.dir("libs").get().asFile
         val proxyJarFile = File(libsDir, "mcp-proxy-all.jar")
 
@@ -20,12 +23,23 @@ abstract class EmbedProxyJarTask : DefaultTask() {
             throw GradleException("Proxy JAR not found at: ${proxyJarFile.absolutePath}")
         }
 
+        // Embed into a private copy, then atomically swap it into place so the watcher only ever
+        // sees a complete jar (never the in-progress `jar uf`).
+        val embedTmp = File(finalJar.parentFile, ".burp-mcp-all.jar.embed.tmp")
+        Files.copy(finalJar.toPath(), embedTmp.toPath(), StandardCopyOption.REPLACE_EXISTING)
+
         execOperations.exec {
             workingDir(projectDir.get().asFile)
-            commandLine("jar", "uf", shadowJar.absolutePath, "-C", libsDir.absolutePath, proxyJarFile.name)
+            commandLine("jar", "uf", embedTmp.absolutePath, "-C", libsDir.absolutePath, proxyJarFile.name)
         }
 
-        logger.lifecycle("Embedded proxy JAR into ${shadowJar.name}")
+        try {
+            Files.move(embedTmp.toPath(), finalJar.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } catch (_: Exception) {
+            Files.move(embedTmp.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+
+        logger.lifecycle("Embedded proxy JAR into ${finalJar.name} (atomic swap)")
     }
 }
 
@@ -97,6 +111,9 @@ tasks {
 
     shadowJar {
         archiveClassifier.set("")
+        // Write to a hidden temp, then atomically publish to burp-mcp-all.jar in doLast so the
+        // user's auto-reload watcher never sees a half-written jar. Final filename is unchanged.
+        archiveFileName.set(".burp-mcp-all.jar.tmp")
         mergeServiceFiles()
 
         manifest {
@@ -126,13 +143,30 @@ tasks {
         exclude("module-info.class")
 
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+        // Resolve paths at configuration time (plain File, config-cache safe) so the doLast closure
+        // captures no project/script references.
+        val tmpJar = layout.buildDirectory.file("libs/.burp-mcp-all.jar.tmp").get().asFile
+        val finalJar = layout.buildDirectory.file("libs/burp-mcp-all.jar").get().asFile
+        doLast {
+            try {
+                Files.move(tmpJar.toPath(), finalJar.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: Exception) {
+                Files.move(tmpJar.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            }
+            logger.lifecycle("Published ${finalJar.path} (atomic)")
+        }
     }
 
     register<EmbedProxyJarTask>("embedProxyJar") {
         group = "build"
         description = "Embeds the MCP proxy JAR into the shadow JAR"
         dependsOn(shadowJar)
-        shadowJarFile.set(shadowJar.flatMap { it.archiveFile })
+        // Do not race the test pipeline: make ordering explicit so `./gradlew test embedProxyJar`
+        // (and `build`) validate cleanly instead of failing on an implicit task dependency.
+        mustRunAfter("test", "compileTestKotlin", "processTestResources")
+        // shadowJar publishes the final jar atomically in its doLast; embed operates on that.
+        shadowJarFile.set(layout.buildDirectory.file("libs/burp-mcp-all.jar"))
         projectDir.set(layout.projectDirectory)
     }
 
