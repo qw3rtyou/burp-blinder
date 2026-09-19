@@ -73,8 +73,21 @@ object SecretDetector {
 
     // IPv4 (dotted quad, each octet 0-255) and IPv6 (must contain ':'; covers compressed `::` forms).
     val IPV4 = Regex("""\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b""")
+    // Comprehensive IPv6: a full 8-group address OR any `::`-compressed form. Deliberately does NOT
+    // match a bare `HH:MM:SS` clock time (3 groups, no `::`), so IP masking and time preservation no
+    // longer overlap (LOW-1). Bounded so it consumes a whole address, including trailing groups.
     val IPV6 = Regex(
-        """(?<![:.\w])(?:[A-Fa-f0-9]{1,4}:){2,7}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|::(?:[A-Fa-f0-9]{1,4}:){0,6}[A-Fa-f0-9]{1,4}"""
+        "(?<![0-9A-Fa-f:.])(?:" +
+            "(?:[0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,7}:" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,6}:[0-9A-Fa-f]{1,4}" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,5}(?::[0-9A-Fa-f]{1,4}){1,2}" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,4}(?::[0-9A-Fa-f]{1,4}){1,3}" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,3}(?::[0-9A-Fa-f]{1,4}){1,4}" +
+            "|(?:[0-9A-Fa-f]{1,4}:){1,2}(?::[0-9A-Fa-f]{1,4}){1,5}" +
+            "|[0-9A-Fa-f]{1,4}:(?::[0-9A-Fa-f]{1,4}){1,6}" +
+            "|:(?:(?::[0-9A-Fa-f]{1,4}){1,7}|:)" +
+            ")(?![0-9A-Fa-f:.])"
     )
 
     // Sensitive cookie names (case-insensitive substring match).

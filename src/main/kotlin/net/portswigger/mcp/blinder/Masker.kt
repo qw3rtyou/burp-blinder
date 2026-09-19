@@ -155,9 +155,10 @@ class Masker(
     // IP masking (LEAK-2), gated by the maskIpAddresses toggle. Raw context, referentially
     // consistent, so the same address always maps to the same placeholder and round-trips exactly.
     private fun maskIps(text: String): String {
-        // Protect clock times so the IPv6 matcher does not swallow `HH:MM:SS` (e.g. Date headers).
-        val timeRanges = timePattern.findAll(text).map { it.range }.toList()
-        var out = replaceOutsidePlaceholders(text, SecretDetector.IPV6, jwtRanges(text) + timeRanges) { ip ->
+        // The comprehensive IPv6 pattern (full 8-group or `::`-compressed) structurally never matches
+        // a bare HH:MM:SS time, so no time carve-out is needed here — a time-shaped group that is part
+        // of a real IPv6 (e.g. 2001:12:34:56::1) is now masked as one whole address (LOW-1 fix).
+        var out = replaceOutsidePlaceholders(text, SecretDetector.IPV6, jwtRanges(text)) { ip ->
             vault.placeholderFor(ip, TokenType.IP)
         }
         out = replaceOutsidePlaceholders(out, SecretDetector.IPV4, jwtRanges(out)) { ip ->
