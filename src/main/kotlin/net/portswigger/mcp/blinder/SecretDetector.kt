@@ -32,12 +32,37 @@ object SecretDetector {
     // `/repos/PortSwigger/mcp-server` (leading slash) is still recognised.
     val STRUCTURAL_IDENTIFIER = Regex("""^[-_./]*[A-Za-z]+(?:[-_./]+[A-Za-z]+)*[-_./]*$""")
 
-    // Phone numbers (PII, masked by default like emails). E.164 (+ and 6-15 digits) or a
-    // separator-grouped national form with an optional extension. Requiring separators avoids
-    // tripping on continuous digit runs (timestamps, ids).
+    // Phone numbers (PII, masked by default like emails). E.164 with optional country-code
+    // separator (`+81 90...`, `+14155552671`), or a separator-grouped national form with optional
+    // extension. Requiring separators/`+` avoids tripping on continuous digit runs (timestamps/ids).
     val PHONE = Regex(
-        """(?<![\d+])(?:\+\d{6,15}|(?:\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?)(?!\d)"""
+        """(?<![\d+])(?:\+\d{1,3}[\s-]?\d{6,14}|(?:\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?)(?!\d)"""
     )
+
+    // Credit-card-shaped candidate: 13-19 digits with optional single space/hyphen separators.
+    // A candidate is only a card if it also passes the Luhn checksum (see luhnValid) — this keeps
+    // random 16-digit ids/timestamps unmasked while catching real PANs.
+    val CARD_CANDIDATE = Regex("""(?<![\d.])(?:\d[ -]?){12,18}\d(?![\d.])""")
+
+    // US SSN standard shape 3-2-4. Non-standard national-id shapes are caught by key name instead.
+    val SSN = Regex("""(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)""")
+
+    /** Luhn (mod-10) checksum over the digits of a card candidate. */
+    fun luhnValid(digits: String): Boolean {
+        if (digits.length !in 13..19 || digits.any { !it.isDigit() }) return false
+        var sum = 0
+        var alt = false
+        for (i in digits.indices.reversed()) {
+            var d = digits[i] - '0'
+            if (alt) {
+                d *= 2
+                if (d > 9) d -= 9
+            }
+            sum += d
+            alt = !alt
+        }
+        return sum % 10 == 0
+    }
 
     // IPv4 (dotted quad, each octet 0-255) and IPv6 (must contain ':'; covers compressed `::` forms).
     val IPV4 = Regex("""\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b""")

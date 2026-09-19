@@ -34,7 +34,20 @@ class Masker(
         "session" to TokenType.COOKIE_SESSION,
         "sessionid" to TokenType.COOKIE_SESSION,
         "session_id" to TokenType.COOKIE_SESSION,
-        "jwt" to TokenType.JWT
+        "jwt" to TokenType.JWT,
+        // PII by key name (value masked regardless of shape — covers non-standard national forms).
+        "ssn" to TokenType.SSN,
+        "social_security" to TokenType.SSN,
+        "socialsecurity" to TokenType.SSN,
+        "social_security_number" to TokenType.SSN,
+        "national_id" to TokenType.SSN,
+        "nationalid" to TokenType.SSN,
+        "tax_id" to TokenType.SSN,
+        "taxid" to TokenType.SSN,
+        "cardnumber" to TokenType.CARD,
+        "card_number" to TokenType.CARD,
+        "creditcard" to TokenType.CARD,
+        "credit_card" to TokenType.CARD
     )
 
     private val sensitiveParamHints =
@@ -73,6 +86,8 @@ class Masker(
         text = maskJsonSensitiveValues(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
+        text = maskCards(text)
+        text = maskSsn(text)
         text = maskPhones(text)
         if (maskIpAddresses) text = maskIps(text)
         if (maskUuids) text = maskUuidPass(text)
@@ -230,6 +245,17 @@ class Masker(
     // Phone numbers (PII), masked by default like emails; raw context, referentially consistent.
     private fun maskPhones(text: String) = replaceOutsidePlaceholders(text, SecretDetector.PHONE, jwtRanges(text)) { phone ->
         vault.placeholderFor(phone, TokenType.PHONE)
+    }
+
+    // Credit-card numbers (PII). Shape candidate + Luhn checksum so random long digit runs
+    // (timestamps/ids) stay unmasked. Stored verbatim (with any separators) for exact round-trip.
+    private fun maskCards(text: String) = replaceOutsidePlaceholders(text, SecretDetector.CARD_CANDIDATE, jwtRanges(text)) { cand ->
+        if (SecretDetector.luhnValid(cand.filter { it.isDigit() })) vault.placeholderFor(cand, TokenType.CARD) else cand
+    }
+
+    // SSN standard shape 3-2-4 (PII). Non-standard national forms are handled by key name.
+    private fun maskSsn(text: String) = replaceOutsidePlaceholders(text, SecretDetector.SSN, jwtRanges(text)) { ssn ->
+        vault.placeholderFor(ssn, TokenType.SSN)
     }
 
     // Standalone token candidates (secrets hidden behind custom key names / in bodies). The length
