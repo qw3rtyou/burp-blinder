@@ -38,6 +38,9 @@ abstract class EmbedProxyJarTask : DefaultTask() {
         } catch (_: Exception) {
             Files.move(embedTmp.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
         }
+        // Bump mtime after the atomic swap so a file watcher (Burp auto-reload) receives a MODIFY
+        // event — an atomic rename alone is often missed by watchers.
+        finalJar.setLastModified(System.currentTimeMillis())
 
         logger.lifecycle("Embedded proxy JAR into ${finalJar.name} (atomic swap)")
     }
@@ -154,6 +157,8 @@ tasks {
             } catch (_: Exception) {
                 Files.move(tmpJar.toPath(), finalJar.toPath(), StandardCopyOption.REPLACE_EXISTING)
             }
+            // Bump mtime after the atomic swap so the auto-reload watcher gets a MODIFY event.
+            finalJar.setLastModified(System.currentTimeMillis())
             logger.lifecycle("Published ${finalJar.path} (atomic)")
         }
     }
