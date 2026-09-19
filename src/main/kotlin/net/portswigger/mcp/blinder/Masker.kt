@@ -213,9 +213,24 @@ class Masker(
             // A JWT value carries analysis value (alg, claim keys). Defer it to the JWT pass so it
             // is selectively masked (structure preserved) instead of opaquely vaulted.
             SecretDetector.looksLikeJwt(value) -> m.value
-            else -> "$prefix${maskLiteral(value, listOf(Encoding.JSON), type)}$suffix"
+            else -> {
+                // An echoed `Authorization: Bearer <token>` value: mask only the token, with the
+                // same BEARER type/vault key as the request-header path, so the header placeholder
+                // and the JSON echo collapse to one identity (no reference fragmentation).
+                val scheme = schemeValue.matchEntire(value)
+                if (scheme != null) {
+                    val kw = scheme.groupValues[1]
+                    val tok = scheme.groupValues[2]
+                    val schemeType = if (kw.equals("Basic", true)) TokenType.BASIC else TokenType.BEARER
+                    "$prefix$kw ${maskLiteral(tok, listOf(Encoding.JSON), schemeType)}$suffix"
+                } else {
+                    "$prefix${maskLiteral(value, listOf(Encoding.JSON), type)}$suffix"
+                }
+            }
         }
     }
+
+    private val schemeValue = Regex("""(?i)(Bearer|Basic)\s+(\S.*)""")
 
     // Nested: base64 token whose decoded content is JSON containing secrets. We mask the inner JSON
     // and re-encode; the Rehydrator reverses this structurally.

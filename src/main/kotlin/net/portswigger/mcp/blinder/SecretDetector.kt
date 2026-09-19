@@ -36,7 +36,11 @@ object SecretDetector {
     // separator (`+81 90...`, `+14155552671`), or a separator-grouped national form with optional
     // extension. Requiring separators/`+` avoids tripping on continuous digit runs (timestamps/ids).
     val PHONE = Regex(
-        """(?<![\d+])(?:\+\d{1,3}[\s-]?\d{6,14}|(?:\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?)(?!\d)"""
+        """(?<![\d+])(?:""" +
+            """\+\d{1,3}[-.\s]?\(?\d{2,4}\)?(?:[-.\s]?\d{2,4}){1,4}""" +  // +CC then grouped/contiguous national (+81 90..., +1 (415) 555-2671, +44-20-7946-0958)
+            """|\+\d{6,15}""" +                                            // bare E.164 contiguous
+            """|(?:\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?""" +  // national grouped 3-3-4 + optional extension
+            """)(?!\d)"""
     )
 
     // Credit-card-shaped candidate: 13-19 digits with optional single space/hyphen separators.
