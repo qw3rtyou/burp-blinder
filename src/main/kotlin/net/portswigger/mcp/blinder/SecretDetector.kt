@@ -26,6 +26,9 @@ object SecretDetector {
     // UUID (canonical 8-4-4-4-12 hex). An identifier, not a secret; masked only under a toggle.
     val UUID = Regex("""\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b""")
 
+    // MAC address (6 hex octets, `:` or `-` separated). Identifier; masked only in STRICT mode.
+    val MAC = Regex("""\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b""")
+
     // Separator-joined alphabetic word list (HTTP header names, snake_case JSON keys, URL paths).
     // These are structural identifiers, never secrets, regardless of length/entropy. Leading,
     // trailing and repeated `-_./` separators are allowed so a request-line path like

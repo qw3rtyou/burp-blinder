@@ -7,6 +7,7 @@ import net.portswigger.mcp.config.McpConfig
 import net.portswigger.mcp.blinder.Blinder
 import net.portswigger.mcp.blinder.Gateway
 import net.portswigger.mcp.blinder.montoya.BlinderHttpHandler
+import net.portswigger.mcp.blinder.montoya.SwingRevealApprover
 import net.portswigger.mcp.providers.ClaudeDesktopProvider
 import net.portswigger.mcp.providers.ManualProxyInstallerProvider
 import net.portswigger.mcp.providers.ProxyJarManager
@@ -24,7 +25,9 @@ class ExtensionBase : BurpExtension {
         val gateway = Gateway(
             log = { message -> api.logging().logToOutput(message) },
             maskIpAddresses = config.maskIpAddresses,
-            maskUuids = config.maskUuids
+            maskUuids = config.maskUuids,
+            maskingMode = config.maskingMode,
+            revealApprover = SwingRevealApprover()
         )
         Blinder.gateway = gateway
         val httpHandlerRegistration = api.http().registerHttpHandler(
@@ -55,6 +58,8 @@ class ExtensionBase : BurpExtension {
                 }
             }
         }
+
+        configUi.onMaskingModeChanged { mode -> gateway.maskingMode = mode }
 
         api.userInterface().registerSuiteTab("MCP", configUi.component)
 

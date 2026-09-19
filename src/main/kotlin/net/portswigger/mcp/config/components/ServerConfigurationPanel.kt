@@ -1,5 +1,6 @@
 package net.portswigger.mcp.config.components
 
+import net.portswigger.mcp.blinder.MaskingMode
 import net.portswigger.mcp.config.Design
 import net.portswigger.mcp.config.McpConfig
 import net.portswigger.mcp.config.ToggleSwitch
@@ -12,7 +13,8 @@ import javax.swing.Box.createVerticalStrut
 class ServerConfigurationPanel(
     private val config: McpConfig,
     private val enabledToggle: ToggleSwitch,
-    private val validationErrorLabel: WarningLabel
+    private val validationErrorLabel: WarningLabel,
+    private val onMaskingModeChanged: (MaskingMode) -> Unit = {}
 ) : JPanel() {
 
     private lateinit var alwaysAllowHttpHistoryCheckBox: JCheckBox
@@ -46,6 +48,9 @@ class ServerConfigurationPanel(
 
         val enabledPanel = createEnabledPanel()
         add(enabledPanel)
+        add(createVerticalStrut(Design.Spacing.MD))
+
+        add(createMaskingModePanel())
         add(createVerticalStrut(Design.Spacing.MD))
 
         val configEditingToolingCheckBox = createCheckBoxWithSubtitle(
@@ -96,6 +101,27 @@ class ServerConfigurationPanel(
         add(filterConfigCredentialsCheckBox)
 
         add(validationErrorLabel)
+    }
+
+    private fun createMaskingModePanel(): JPanel {
+        val combo = JComboBox(MaskingMode.entries.toTypedArray()).apply {
+            selectedItem = config.maskingMode
+            addItemListener { event ->
+                if (event.stateChange == ItemEvent.SELECTED) {
+                    (event.item as? MaskingMode)?.let { onMaskingModeChanged(it) }
+                }
+            }
+        }
+        return JPanel(FlowLayout(FlowLayout.LEFT, 0, 4)).apply {
+            isOpaque = false
+            alignmentX = LEFT_ALIGNMENT
+            add(JLabel("Masking mode").apply {
+                font = Design.Typography.bodyLarge
+                foreground = Design.Colors.onSurface
+            })
+            add(createHorizontalStrut(Design.Spacing.MD))
+            add(combo)
+        }
     }
 
     private fun createEnabledPanel(): JPanel {

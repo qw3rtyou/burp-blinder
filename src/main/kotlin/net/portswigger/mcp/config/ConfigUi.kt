@@ -6,6 +6,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import net.portswigger.mcp.ServerState
 import net.portswigger.mcp.Swing
+import net.portswigger.mcp.blinder.MaskingMode
 import net.portswigger.mcp.config.components.*
 import net.portswigger.mcp.providers.Provider
 import java.awt.BorderLayout
@@ -51,6 +52,7 @@ class ConfigUi(private val config: McpConfig, private val providers: List<Provid
     private lateinit var installationPanel: InstallationPanel
 
     private var toggleListener: ((Boolean) -> Unit)? = null
+    private var maskingModeListener: ((MaskingMode) -> Unit)? = null
     private var suppressToggleEvents: Boolean = false
 
     private val dataAccessRefreshListener: () -> Unit = {
@@ -70,7 +72,11 @@ class ConfigUi(private val config: McpConfig, private val providers: List<Provid
 
     private fun initializeComponents() {
         serverConfigurationPanel = ServerConfigurationPanel(
-            config = config, enabledToggle = enabledToggle, validationErrorLabel = validationErrorLabel
+            config = config, enabledToggle = enabledToggle, validationErrorLabel = validationErrorLabel,
+            onMaskingModeChanged = { mode ->
+                config.maskingMode = mode
+                maskingModeListener?.invoke(mode)
+            }
         )
 
         advancedOptionsPanel = AdvancedOptionsPanel(
@@ -102,6 +108,10 @@ class ConfigUi(private val config: McpConfig, private val providers: List<Provid
 
     fun onEnabledToggled(listener: (Boolean) -> Unit) {
         toggleListener = listener
+    }
+
+    fun onMaskingModeChanged(listener: (MaskingMode) -> Unit) {
+        maskingModeListener = listener
     }
 
     fun getConfig(): McpConfig {

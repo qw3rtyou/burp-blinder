@@ -64,7 +64,8 @@ class ToolPolicyTest {
         assertEquals(13, ToolPolicy.OUTPUT_MASK_TOOLS.size) // 11 read + 2 dual send/read
         assertEquals(6, ToolPolicy.INPUT_REHYDRATE_TOOLS.size)
         assertEquals(10, ToolPolicy.NEUTRAL_TOOLS.size)
-        assertEquals(27, ToolPolicy.ALLOWED.size)
+        assertEquals(1, ToolPolicy.REVEAL_TOOLS.size) // human-gated reveal_placeholder
+        assertEquals(28, ToolPolicy.ALLOWED.size) // 27 analyst tools + reveal
     }
 
     @Test

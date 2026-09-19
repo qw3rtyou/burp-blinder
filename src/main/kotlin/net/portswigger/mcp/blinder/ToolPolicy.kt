@@ -52,10 +52,19 @@ object ToolPolicy {
         "generate_collaborator_payload"
     )
 
+    /**
+     * Special human-gated tool. Its output is the real value (post human-approval) and is the ONE
+     * intentional exception to output masking; its input placeholder must NOT be rehydrated (the
+     * handler needs the literal placeholder to look it up). So it is allow-listed but excluded from
+     * both the mask and rehydrate sets.
+     */
+    val REVEAL_TOOLS: Set<String> = setOf("reveal_placeholder")
+
     /** The full whitelist. Any tool not present is denied. */
-    val ALLOWED: Set<String> = OUTPUT_MASK_TOOLS + INPUT_REHYDRATE_TOOLS + NEUTRAL_TOOLS
+    val ALLOWED: Set<String> = OUTPUT_MASK_TOOLS + INPUT_REHYDRATE_TOOLS + NEUTRAL_TOOLS + REVEAL_TOOLS
 
     fun isAllowed(tool: String): Boolean = tool in ALLOWED
     fun needsOutputMasking(tool: String): Boolean = tool in OUTPUT_MASK_TOOLS
     fun needsInputRehydration(tool: String): Boolean = tool in INPUT_REHYDRATE_TOOLS
+    fun isReveal(tool: String): Boolean = tool in REVEAL_TOOLS
 }

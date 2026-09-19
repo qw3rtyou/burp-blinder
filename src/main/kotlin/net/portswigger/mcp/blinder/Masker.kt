@@ -12,11 +12,23 @@ package net.portswigger.mcp.blinder
  */
 class Masker(
     private val vault: Vault,
-    /** LEAK-2 policy toggle. Default OFF preserves prior behaviour (IPs pass through). */
-    private val maskIpAddresses: Boolean = false,
-    /** UUIDs are identifiers, not secrets. Default OFF leaves them readable; ON masks them. */
-    private val maskUuids: Boolean = false
+    maskIpAddresses: Boolean = false,
+    maskUuids: Boolean = false,
+    mode: MaskingMode = MaskingMode.SELECTIVE
 ) {
+    /** LEAK-2 policy toggle. Default OFF preserves prior behaviour (IPs pass through). Runtime-settable. */
+    @Volatile
+    var maskIpAddresses: Boolean = maskIpAddresses
+
+    /** UUIDs are identifiers, not secrets. Default OFF leaves them readable; ON masks them. Runtime-settable. */
+    @Volatile
+    var maskUuids: Boolean = maskUuids
+
+    /** Masking mode (OFF/SELECTIVE/STRICT), changeable at runtime from the config tab. */
+    @Volatile
+    var mode: MaskingMode = mode
+
+    private val strict: Boolean get() = mode == MaskingMode.STRICT
 
     // JSON keys whose string values are secrets, mapped to a token type hint.
     private val sensitiveJsonKeys: Map<String, TokenType> = mapOf(
@@ -98,6 +110,7 @@ class Masker(
     }
 
     fun mask(input: String): String {
+        if (mode == MaskingMode.OFF) return input
         var text = input
         text = maskPem(text)
         text = maskAuthorization(text)
@@ -116,10 +129,17 @@ class Masker(
         text = maskCards(text)
         text = maskSsn(text)
         text = maskPhones(text)
-        if (maskIpAddresses) text = maskIps(text)
-        if (maskUuids) text = maskUuidPass(text)
+        // MAC before IP: an IPv6 pattern would otherwise swallow a colon-separated MAC as an IP.
+        if (strict) text = maskMac(text)
+        if (maskIpAddresses || strict) text = maskIps(text)
+        if (maskUuids || strict) text = maskUuidPass(text)
         text = maskHighEntropy(text)
         return text
+    }
+
+    // MAC addresses — masked only in STRICT (aggressive, toggle-ignoring).
+    private fun maskMac(text: String) = replaceOutsidePlaceholders(text, SecretDetector.MAC, jwtRanges(text)) { mac ->
+        vault.placeholderFor(mac, TokenType.MAC)
     }
 
     // UUID masking (identifier), gated by the maskUuids toggle. Raw context, referentially consistent.
@@ -181,7 +201,8 @@ class Masker(
             val leading = part.takeWhile { it == ' ' }
             val name = part.substring(0, eq).trim()
             val value = part.substring(eq + 1)
-            if (value.isNotBlank() && SecretDetector.isSensitiveCookieName(name)) {
+            // STRICT masks every cookie value; SELECTIVE only sensitive-named cookies.
+            if (value.isNotBlank() && (strict || SecretDetector.isSensitiveCookieName(name))) {
                 val type = if (name.lowercase().let { it.contains("sess") || it.contains("sid") })
                     TokenType.COOKIE_SESSION else TokenType.COOKIE
                 "$leading$name=${maskLiteral(value.trim(), emptyList(), type)}"
@@ -194,7 +215,7 @@ class Masker(
     private fun maskSetCookieHeader(text: String) = setCookieHeader.replace(text) { m ->
         val name = m.groupValues[3].trim()
         val value = m.groupValues[4]
-        if (SecretDetector.isSensitiveCookieName(name)) {
+        if (strict || SecretDetector.isSensitiveCookieName(name)) {
             val type = if (name.lowercase().let { it.contains("sess") || it.contains("sid") })
                 TokenType.COOKIE_SESSION else TokenType.COOKIE
             "${m.groupValues[1]}:${m.groupValues[2]}${m.groupValues[3]}=${maskLiteral(value, emptyList(), type)}${m.groupValues[5]}"
@@ -330,6 +351,10 @@ class Masker(
     // whole via the '=' separator.
     private val isolatedToken = Regex("""(?<![A-Za-z0-9+/_\-])[A-Za-z0-9+/_\-]{20,}={0,2}(?![A-Za-z0-9+/_\-])""")
 
+    // STRICT: lower floor and mask every candidate (over-masking accepted) — catches low-shape/low-
+    // entropy values that SELECTIVE deliberately leaves readable.
+    private val strictToken = Regex("""(?<![A-Za-z0-9+/_\-])[A-Za-z0-9+/_\-]{10,}={0,2}(?![A-Za-z0-9+/_\-])""")
+
     // Position exclusions: an HTTP header field-name token (line start, before ':') and a JSON
     // object key are structural, never secret values. Masking only applies to VALUE positions.
     private val headerFieldName = Regex("""(?im)^([A-Za-z0-9._-]+)[ \t]*:""")
@@ -343,11 +368,14 @@ class Masker(
                 jsonKey.findAll(text).map { it.groups[1]!!.range } +
                 if (!maskUuids) SecretDetector.UUID.findAll(text).map { it.range }.toList() else emptyList()
 
-        return replaceOutsidePlaceholders(text, isolatedToken, protectedRanges = protected) { token ->
+        val regex = if (strict) strictToken else isolatedToken
+        return replaceOutsidePlaceholders(text, regex, protectedRanges = protected) { token ->
             when {
                 // A base64 blob that already carries masked placeholders was handled by the nested
                 // pass; do not clobber it (that would break structural rehydration).
                 isNestedMaskedBlob(token) -> token
+                // STRICT masks any candidate (over-masking accepted); SELECTIVE uses the precision gate.
+                strict -> vault.placeholderFor(token, TokenType.SECRET)
                 isMaskableSecret(token) -> vault.placeholderFor(token, TokenType.SECRET)
                 else -> token
             }

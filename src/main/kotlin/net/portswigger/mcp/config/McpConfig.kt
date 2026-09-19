@@ -2,6 +2,7 @@ package net.portswigger.mcp.config
 
 import burp.api.montoya.logging.Logging
 import burp.api.montoya.persistence.PersistedObject
+import net.portswigger.mcp.blinder.MaskingMode
 import java.lang.ref.WeakReference
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.properties.ReadWriteProperty
@@ -55,6 +56,14 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
 
     // Blinder policy toggle. Default false = UUID identifiers are not masked (readable for analysis).
     var maskUuids by storage.boolean(false)
+
+    // Blinder masking mode (OFF/SELECTIVE/STRICT), persisted by name. Default SELECTIVE.
+    private var maskingModeName by storage.string(MaskingMode.SELECTIVE.name)
+    var maskingMode: MaskingMode
+        get() = MaskingMode.fromNameOrDefault(maskingModeName)
+        set(value) {
+            maskingModeName = value.name
+        }
 
     private var _autoApproveTargets by storage.stringList("")
     private val targetsChangeListeners = CopyOnWriteArrayList<ListenerRegistration>()

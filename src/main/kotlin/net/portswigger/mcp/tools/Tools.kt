@@ -401,6 +401,14 @@ fun Server.registerTools(api: MontoyaApi, config: McpConfig) {
 
         "Editor text has been set"
     }
+
+    mcpTool<RevealPlaceholder>(
+        "Requests the real value behind a masked placeholder (e.g. {{COOKIE_SESSION_1}}). " +
+            "The value is NOT returned automatically: the human operator must approve the disclosure " +
+            "in a Burp dialog. Returns the real value only on approval, otherwise a refusal message."
+    ) {
+        net.portswigger.mcp.blinder.Blinder.gateway.reveal(placeholder)
+    }
 }
 
 fun getActiveEditor(api: MontoyaApi): JTextArea? {
@@ -502,6 +510,9 @@ data class SetProxyInterceptState(val intercepting: Boolean)
 
 @Serializable
 data class SetActiveEditorContents(val text: String)
+
+@Serializable
+data class RevealPlaceholder(val placeholder: String)
 
 @Serializable
 data class GetScannerIssues(override val count: Int, override val offset: Int) : Paginated
