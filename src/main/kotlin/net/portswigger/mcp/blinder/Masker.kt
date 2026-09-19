@@ -50,8 +50,34 @@ class Masker(
         "credit_card" to TokenType.CARD
     )
 
-    private val sensitiveParamHints =
-        listOf("token", "session", "sess", "sid", "auth", "csrf", "xsrf", "secret", "key", "password", "apikey")
+    // Sensitive parameter/form key names, matched on a normalized form (lowercased, `-`/`_` removed)
+    // so `api_key`, `api-key`, `apiKey`, `APIKEY` all collapse to `apikey`. Exact names plus a few
+    // strong suffixes (so `csrf_token`, `reset_token`, `x_session_id` are caught) — exact matching
+    // avoids substring false positives like `monkey`/`username`.
+    private val sensitiveKeyExact = setOf(
+        "password", "passwd", "pwd", "pass", "token", "accesstoken", "refreshtoken", "idtoken",
+        "secret", "clientsecret", "apikey", "apitoken", "auth", "authorization", "session",
+        "sessionid", "sessiontoken", "sid", "csrf", "xsrf", "otp", "pin", "secretkey", "privatekey",
+        "creditcard", "cardnumber", "ssn"
+    )
+    private val sensitiveKeySuffix = listOf("password", "passwd", "token", "secret", "apikey", "sessionid")
+
+    private fun normalizeKey(name: String): String = name.lowercase().replace(Regex("[-_]"), "")
+
+    private fun isSensitiveParamKey(name: String): Boolean {
+        val n = normalizeKey(name)
+        return n in sensitiveKeyExact || sensitiveKeySuffix.any { n.endsWith(it) }
+    }
+
+    private fun paramKeyType(name: String): TokenType {
+        val n = normalizeKey(name)
+        return when {
+            n.contains("ssn") -> TokenType.SSN
+            n.contains("card") -> TokenType.CARD
+            n == "accesstoken" -> TokenType.BEARER
+            else -> TokenType.SECRET
+        }
+    }
 
     /**
      * Register a literal as a placeholder with the given encoding chain, verifying reversibility.
@@ -83,6 +109,7 @@ class Masker(
         // destroy the alg/claim structure (FAIL-1). Later passes protect the JWT ranges.
         text = maskJwts(text)
         text = maskQueryParams(text)
+        text = maskFormKeys(text)
         text = maskJsonSensitiveValues(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
@@ -189,7 +216,7 @@ class Masker(
             val name = pair.substring(0, eq)
             val value = pair.substring(eq + 1)
             if (value.isBlank()) return@joinToString pair
-            val nameSensitive = sensitiveParamHints.any { name.lowercase().contains(it) }
+            val nameSensitive = isSensitiveParamKey(name)
             val decoded = runCatching { Encoding.URL.decode(value) }.getOrNull()
             val valueSecret = decoded != null &&
                     (SecretDetector.looksLikeJwt(decoded) || SecretDetector.isHighEntropySecret(decoded) ||
@@ -199,6 +226,28 @@ class Masker(
             } else pair
         }
         "$method$path?$newQuery$proto"
+    }
+
+    // Key-based masking for form-urlencoded bodies (and any `key=value` outside the request line).
+    // Covers login POSTs (`password=...`) that JSON key-based masking misses. Only sensitive keys
+    // are touched; values already turned into placeholders (e.g. request-line query) are skipped.
+    private val formPair = Regex("""(?<![A-Za-z0-9_%.\-])([A-Za-z0-9_.\[\]\-]{1,64})=([^&#\s"'<>\\]+)""")
+    private fun maskFormKeys(text: String): String {
+        val skip = Placeholder.parseAll(text).map { it.range } + jwtRanges(text)
+        return formPair.replace(text) { m ->
+            val overlaps = skip.any { it.first <= m.range.last && m.range.first <= it.last }
+            val key = m.groupValues[1]
+            val value = m.groupValues[2]
+            when {
+                overlaps || Placeholder.containsAny(value) -> m.value
+                !isSensitiveParamKey(key) -> m.value
+                else -> {
+                    // Byte-exact by default (raw); only decode when the value is actually %-encoded.
+                    val chain = if (value.contains('%')) listOf(Encoding.URL) else emptyList()
+                    "$key=${maskLiteral(value, chain, paramKeyType(key))}"
+                }
+            }
+        }
     }
 
     private val jsonPair = Regex("""("([A-Za-z0-9_]+)"\s*:\s*")([^"\\]*(?:\\.[^"\\]*)*)(")""")
