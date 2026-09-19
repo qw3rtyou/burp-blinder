@@ -117,6 +117,7 @@ class Masker(
         text = maskApiKeyHeaders(text)
         text = maskCookieHeader(text)
         text = maskSetCookieHeader(text)
+        text = maskUriCredentials(text)
         // JWTs are converted to their selective analysis view BEFORE the nested/base64 and
         // high-entropy passes, which would otherwise hijack/clobber the base64url segments and
         // destroy the alg/claim structure (FAIL-1). Later passes protect the JWT ranges.
@@ -169,6 +170,16 @@ class Masker(
 
     private fun maskPem(text: String) = SecretDetector.PEM.replace(text) {
         vault.placeholderFor(it.value, TokenType.PEM)
+    }
+
+    // Connection-string / URI userinfo: mask the PASSWORD only, preserving scheme/user/host/port/path
+    // so the structure stays readable (postgres://admin:{{SECRET_1}}@db:5432/prod). Password stored
+    // verbatim -> byte-exact round-trip; same password -> same placeholder (reference consistency).
+    private fun maskUriCredentials(text: String) = SecretDetector.URI_CREDENTIALS.replace(text) { m ->
+        val user = m.groupValues[1]
+        val password = m.groupValues[2]
+        if (Placeholder.containsAny(password)) m.value
+        else "//$user:${maskLiteral(password, emptyList(), TokenType.SECRET)}@"
     }
 
     private val authHeader = Regex("""(?im)^(authorization|proxy-authorization):([ \t]*)(.+?)([ \t]*)$""")

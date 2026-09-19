@@ -55,6 +55,11 @@ object SecretDetector {
     // US SSN standard shape 3-2-4. Non-standard national-id shapes are caught by key name instead.
     val SSN = Regex("""(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)""")
 
+    // Connection-string / URI userinfo `//user:password@host`. Requires the `//` authority marker
+    // and a trailing `@`, so `http://host/a:b` (path colon, no userinfo) does not match. Group 1 is
+    // the user, group 2 the password (masked). Works for postgres/mysql(jdbc)/mongodb/redis/amqp/ftp.
+    val URI_CREDENTIALS = Regex("""//([^\s:/@]+):([^\s/@]+)@""")
+
     /** Luhn (mod-10) checksum over the digits of a card candidate. */
     fun luhnValid(digits: String): Boolean {
         if (digits.length !in 13..19 || digits.any { !it.isDigit() }) return false
