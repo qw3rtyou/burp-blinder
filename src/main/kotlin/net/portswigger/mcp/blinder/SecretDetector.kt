@@ -42,7 +42,8 @@ object SecretDetector {
         """(?<![\d+])(?:""" +
             """\+\d{1,3}[-.\s]?\(?\d{2,4}\)?(?:[-.\s]?\d{2,4}){1,4}""" +  // +CC then grouped/contiguous national (+81 90..., +1 (415) 555-2671, +44-20-7946-0958)
             """|\+\d{6,15}""" +                                            // bare E.164 contiguous
-            """|(?:\d{1,3}[-.\s])?\(?\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?""" +  // national grouped 3-3-4 + optional extension
+            """|\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}(?:\s?(?:[xX]|ext\.?)\s?\d{1,7})?""" +  // (area)-code form ((254)954-1289, (800) 555 0199, (775)976-6794 x41206)
+            """|(?:\d{1,3}[-.\s])?\d{3}[-.\s]\d{3}[-.\s]\d{4}(?:\s?[xX]\d{1,7})?""" +  // national grouped 3-3-4 + optional extension
             """)(?!\d)"""
     )
 
