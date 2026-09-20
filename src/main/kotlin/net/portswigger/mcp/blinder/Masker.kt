@@ -155,6 +155,7 @@ class Masker(
         text = maskQueryParams(text)
         text = maskFormKeys(text)
         text = maskJsonSensitiveValues(text)
+        text = maskEscapedJsonSensitiveValues(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
         text = maskEncodedEmails(text)
@@ -345,8 +346,7 @@ class Masker(
         val key = m.groupValues[2]
         val value = m.groupValues[3]
         val suffix = m.groupValues[4]
-        // Exact map first, then suffix matcher (DB_PASSWORD, API_SECRET, ACCESS_TOKEN, ...).
-        val type = sensitiveJsonKeys[key.lowercase()] ?: if (isSensitiveParamKey(key)) paramKeyType(key) else null
+        val type = sensitiveJsonValueType(key)
         when {
             type == null || value.isBlank() -> m.value
             // A JWT value carries analysis value (alg, claim keys). Defer it to the JWT pass so it
@@ -370,6 +370,27 @@ class Masker(
     }
 
     private val schemeValue = Regex("""(?i)(Bearer|Basic)\s+(\S.*)""")
+
+    // Exact map first, then suffix matcher (DB_PASSWORD, API_SECRET, ACCESS_TOKEN, ...).
+    private fun sensitiveJsonValueType(key: String): TokenType? =
+        sensitiveJsonKeys[key.lowercase()] ?: if (isSensitiveParamKey(key)) paramKeyType(key) else null
+
+    // Double-encoded JSON: a JSON body serialised INTO a JSON string escapes its quotes as `\"`
+    // (httpbin `data`, webhook/log/queue wrappers). Key-based masking must see `\"key\":\"value\"`
+    // too. One level of escaping is handled; the value only is masked (escapes/structure preserved),
+    // byte-exact round-trip.
+    private val escapedJsonPair = Regex("""(\\"([A-Za-z0-9_]+)\\"\s*:\s*\\")([^"\\]*)(\\")""")
+    private fun maskEscapedJsonSensitiveValues(text: String) = escapedJsonPair.replace(text) { m ->
+        val prefix = m.groupValues[1]
+        val key = m.groupValues[2]
+        val value = m.groupValues[3]
+        val suffix = m.groupValues[4]
+        val type = sensitiveJsonValueType(key)
+        when {
+            type == null || value.isBlank() || Placeholder.containsAny(value) || SecretDetector.looksLikeJwt(value) -> m.value
+            else -> "$prefix${maskLiteral(value, emptyList(), type)}$suffix"
+        }
+    }
 
     // Nested: base64 token whose decoded content is JSON containing secrets. We mask the inner JSON
     // and re-encode; the Rehydrator reverses this structurally.
