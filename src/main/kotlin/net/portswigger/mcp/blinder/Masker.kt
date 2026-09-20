@@ -98,7 +98,7 @@ class Masker(
     // deliberately excluded to avoid public_key-style false positives.
     private val sensitiveKeySuffix = listOf(
         "password", "passwd", "token", "secret", "apikey", "sessionid",
-        "accesskey", "secretkey", "privatekey", "clientsecret"
+        "accesskey", "secretkey", "privatekey", "clientsecret", "accountkey"
     )
 
     private fun normalizeKey(name: String): String = name.lowercase().replace(Regex("[-_]"), "")
@@ -157,6 +157,8 @@ class Masker(
         text = maskJsonSensitiveValues(text)
         text = maskEscapedJsonSensitiveValues(text)
         text = maskConfigKeyValues(text)
+        text = maskXmlCdataElements(text)
+        text = maskXmlElements(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
         text = maskEncodedEmails(text)
@@ -322,7 +324,8 @@ class Masker(
     // Key-based masking for form-urlencoded bodies (and any `key=value` outside the request line).
     // Covers login POSTs (`password=...`) that JSON key-based masking misses. Only sensitive keys
     // are touched; values already turned into placeholders (e.g. request-line query) are skipped.
-    private val formPair = Regex("""(?<![A-Za-z0-9_%.\-])([A-Za-z0-9_.\[\]\-]{1,64})=([^&#\s"'<>\\]+)""")
+    // `;` is a value delimiter too, so ADO.NET/ODBC `Server=..;Pwd=..;` values stop at the semicolon.
+    private val formPair = Regex("""(?<![A-Za-z0-9_%.\-])([A-Za-z0-9_.\[\]\-]{1,64})=([^&#;\s"'<>\\]+)""")
     private fun maskFormKeys(text: String): String {
         val skip = Placeholder.parseAll(text).map { it.range } + jwtRanges(text)
         return formPair.replace(text) { m ->
@@ -407,6 +410,28 @@ class Masker(
                 }
             }
         }
+    }
+
+    // XML element `<tag>value</tag>` (SOAP `<wsse:Password>`, web.config, strings.xml). Masks the
+    // element text ONLY when the tag's local name is sensitive; namespace prefix allowed. Opening and
+    // closing tags captured verbatim -> byte-exact. `\2` back-references the full tag name.
+    private val xmlElement = Regex("""(<((?:[A-Za-z][\w.\-]*:)?([A-Za-z][\w.\-]*))(?:\s[^>]*)?>)([^<]*)(</\2\s*>)""")
+    private fun maskXmlElements(text: String) = xmlElement.replace(text) { m ->
+        maskXmlValue(m.groupValues[1], m.groupValues[3], m.groupValues[4], m.groupValues[5])
+    }
+
+    private val xmlCdataElement = Regex(
+        """(<((?:[A-Za-z][\w.\-]*:)?([A-Za-z][\w.\-]*))(?:\s[^>]*)?><!\[CDATA\[)(.*?)(\]\]></\2\s*>)""",
+        RegexOption.DOT_MATCHES_ALL
+    )
+    private fun maskXmlCdataElements(text: String) = xmlCdataElement.replace(text) { m ->
+        maskXmlValue(m.groupValues[1], m.groupValues[3], m.groupValues[4], m.groupValues[5])
+    }
+
+    private fun maskXmlValue(open: String, localName: String, value: String, close: String): String {
+        val type = sensitiveJsonValueType(localName)
+        return if (type == null || value.isBlank() || Placeholder.containsAny(value)) "$open$value$close"
+        else "$open${maskLiteral(value, emptyList(), type)}$close"
     }
 
     private val escapedJsonPair = Regex("""(\\"([A-Za-z0-9_]+)\\"\s*:\s*\\")([^"\\]*)(\\")""")
