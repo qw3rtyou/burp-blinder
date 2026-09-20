@@ -73,3 +73,18 @@ the clock), and the Burp response envelope.
 Names, street addresses, postal codes, geo-coordinates; passports / driver-licence
 and other national IDs beyond SSN; pure-alphabetic word-like secrets (detection
 limit — use STRICT + reveal). These can be extended if needed.
+
+## Scope & when to use
+burp-blinder makes it safe to use an **external / frontier AI** for Burp traffic
+analysis: you get frontier-model quality while PII, keys and internal identifiers
+are stripped from what the model sees.
+
+- **Best fit:** external model + traffic carrying PII / keys / internal topology (the common case).
+- **Fully-isolated local model** (no logging, no downstream tools): leak-prevention value is
+  marginal — that is expected; blinder targets the external-model case. It can still add
+  defense-in-depth when the "local" model is on shared infra, logs prompts, or the agent calls
+  external tools.
+- **Source-code IP is out of scope.** You cannot mask logic and still have the agent analyze it.
+  For code-touching analysis that must not leave the org, run a local model and send only the
+  minimal relevant code. burp-blinder only strips *incidental* secrets embedded in code
+  (hardcoded keys, internal URLs/hosts).
