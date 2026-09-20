@@ -19,6 +19,7 @@ enum class TokenType(val prefix: String) {
     CARD("CARD"),
     SSN("SSN"),
     MAC("MAC"),
+    IHOST("IHOST"),
     SECRET("SECRET");
 
     companion object {

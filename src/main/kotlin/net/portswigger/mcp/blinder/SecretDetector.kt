@@ -65,6 +65,29 @@ object SecretDetector {
     // the user, group 2 the password (masked). Works for postgres/mysql(jdbc)/mongodb/redis/amqp/ftp.
     val URI_CREDENTIALS = Regex("""//([^\s:/@]+):([^\s/@]+)@""")
 
+    /**
+     * True if an IP literal is private/internal topology: RFC1918, loopback, link-local, or IPv6
+     * ULA/loopback/link-local. Public IPs return false (left readable unless the public-IP toggle
+     * or STRICT is on).
+     */
+    fun isInternalIp(ip: String): Boolean {
+        if (ip.contains(':')) {
+            val lower = ip.lowercase()
+            if (lower == "::1") return true                          // loopback
+            val firstHextet = lower.takeWhile { it != ':' }.toIntOrNull(16) ?: return false
+            return firstHextet in 0xfe80..0xfebf || firstHextet in 0xfc00..0xfdff // link-local, ULA
+        }
+        val octets = ip.split(".")
+        if (octets.size != 4) return false
+        val o = octets.map { it.toIntOrNull() ?: return false }
+        if (o.any { it !in 0..255 }) return false
+        return o[0] == 10 ||
+            o[0] == 127 ||
+            (o[0] == 192 && o[1] == 168) ||
+            (o[0] == 169 && o[1] == 254) ||
+            (o[0] == 172 && o[1] in 16..31)
+    }
+
     /** Luhn (mod-10) checksum over the digits of a card candidate. */
     fun luhnValid(digits: String): Boolean {
         if (digits.length !in 13..19 || digits.any { !it.isDigit() }) return false

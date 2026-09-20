@@ -14,11 +14,32 @@ class Masker(
     private val vault: Vault,
     maskIpAddresses: Boolean = false,
     maskUuids: Boolean = false,
-    mode: MaskingMode = MaskingMode.SELECTIVE
+    mode: MaskingMode = MaskingMode.SELECTIVE,
+    /** Mask private/internal IPs (RFC1918/loopback/link-local/ULA) even in SELECTIVE. Default ON. */
+    maskPrivateIps: Boolean = true,
+    /** Internal DNS suffixes/hosts to mask (topology). Default corporate suffixes. */
+    internalDomains: List<String> = DEFAULT_INTERNAL_DOMAINS
 ) {
-    /** LEAK-2 policy toggle. Default OFF preserves prior behaviour (IPs pass through). Runtime-settable. */
+    companion object {
+        val DEFAULT_INTERNAL_DOMAINS = listOf("local", "internal", "corp", "lan", "intranet", "home.arpa")
+    }
+
+    /** LEAK-2 policy toggle. Default OFF preserves prior behaviour (public IPs pass through). Runtime-settable. */
     @Volatile
     var maskIpAddresses: Boolean = maskIpAddresses
+
+    @Volatile
+    var maskPrivateIps: Boolean = maskPrivateIps
+
+    // Internal-host matcher, built from the configured suffix list. A hostname is masked only when it
+    // ends in one of these suffixes at a label boundary (so `.corp` matches `x.corp`, never
+    // `mycorp.com`), and public TLDs (.com/.net/.org) never appear in the list.
+    private val internalHostRegex: Regex? = if (internalDomains.isEmpty()) null else Regex(
+        "(?<![A-Za-z0-9-])(?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\\.)+" +
+            "(?:" + internalDomains.joinToString("|") { Regex.escape(it) } + ")" +
+            "(?![A-Za-z0-9.\\-])",
+        RegexOption.IGNORE_CASE
+    )
 
     /** UUIDs are identifiers, not secrets. Default OFF leaves them readable; ON masks them. Runtime-settable. */
     @Volatile
@@ -133,7 +154,11 @@ class Masker(
         text = maskPhones(text)
         // MAC before IP: an IPv6 pattern would otherwise swallow a colon-separated MAC as an IP.
         if (strict) text = maskMac(text)
-        if (maskIpAddresses || strict) text = maskIps(text)
+        text = maskInternalHosts(text)
+        when {
+            maskIpAddresses || strict -> text = maskIps(text)             // all IPs
+            maskPrivateIps -> text = maskPrivateIpsPass(text)             // private/internal only
+        }
         if (maskUuids || strict) text = maskUuidPass(text)
         text = maskHighEntropy(text)
         return text
@@ -142,6 +167,25 @@ class Masker(
     // MAC addresses — masked only in STRICT (aggressive, toggle-ignoring).
     private fun maskMac(text: String) = replaceOutsidePlaceholders(text, SecretDetector.MAC, jwtRanges(text)) { mac ->
         vault.placeholderFor(mac, TokenType.MAC)
+    }
+
+    // Private/internal IPs only (RFC1918/loopback/link-local/ULA). Public IPs are left readable.
+    private fun maskPrivateIpsPass(text: String): String {
+        var out = replaceOutsidePlaceholders(text, SecretDetector.IPV6, jwtRanges(text)) { ip ->
+            if (SecretDetector.isInternalIp(ip)) vault.placeholderFor(ip, TokenType.IP) else ip
+        }
+        out = replaceOutsidePlaceholders(out, SecretDetector.IPV4, jwtRanges(out)) { ip ->
+            if (SecretDetector.isInternalIp(ip)) vault.placeholderFor(ip, TokenType.IP) else ip
+        }
+        return out
+    }
+
+    // Internal hostnames (topology): mask the host only, preserving scheme/port/path/URL structure.
+    private fun maskInternalHosts(text: String): String {
+        val regex = internalHostRegex ?: return text
+        return replaceOutsidePlaceholders(text, regex, jwtRanges(text)) { host ->
+            vault.placeholderFor(host, TokenType.IHOST)
+        }
     }
 
     // UUID masking (identifier), gated by the maskUuids toggle. Raw context, referentially consistent.

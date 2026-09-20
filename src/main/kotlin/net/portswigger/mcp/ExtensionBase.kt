@@ -27,7 +27,9 @@ class ExtensionBase : BurpExtension {
             maskIpAddresses = config.maskIpAddresses,
             maskUuids = config.maskUuids,
             maskingMode = config.maskingMode,
-            revealApprover = SwingRevealApprover()
+            revealApprover = SwingRevealApprover(),
+            maskPrivateIps = config.maskPrivateIps,
+            internalDomains = config.internalDomains
         )
         Blinder.gateway = gateway
         val httpHandlerRegistration = api.http().registerHttpHandler(

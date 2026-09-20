@@ -18,7 +18,7 @@ class UriCredentialTest {
     fun `connection-string passwords are masked, structure and user preserved`() {
         val cases = mapOf(
             "postgres://admin:S3cr3tP4ss@db.example.com:5432/prod" to "S3cr3tP4ss",
-            "jdbc:mysql://root:hunter2pw@10.0.0.1:3306/app" to "hunter2pw",
+            "jdbc:mysql://root:hunter2pw@dbhost.example.com:3306/app" to "hunter2pw",
             "mongodb://svc:MongoPw99@mongo:27017/db" to "MongoPw99",
             "redis://default:Redd1sPw@cache:6379/0" to "Redd1sPw",
             "amqp://guest:guestpw@rabbit:5672/vhost" to "guestpw",
@@ -53,7 +53,7 @@ class UriCredentialTest {
         val vault = Vault()
         val masker = Masker(vault)
         val rehydrator = Rehydrator(vault)
-        val real = """{"pg":"postgres://admin:S3cr3tP4ss@db.example.com:5432/prod","my":"jdbc:mysql://root:hunter2pw@10.0.0.1:3306/app"}"""
+        val real = """{"pg":"postgres://admin:S3cr3tP4ss@db.example.com:5432/prod","my":"jdbc:mysql://root:hunter2pw@dbhost.example.com:3306/app"}"""
         val masked = masker.mask(real)
         assertFalse(masked.contains("S3cr3tP4ss"), masked)
         assertFalse(masked.contains("hunter2pw"), masked)

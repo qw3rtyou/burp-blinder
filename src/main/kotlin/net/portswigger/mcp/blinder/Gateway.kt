@@ -19,11 +19,15 @@ class Gateway(
     /** Masking mode (OFF/SELECTIVE/STRICT). */
     maskingMode: MaskingMode = MaskingMode.SELECTIVE,
     /** Human approver for reveal_placeholder. Fail-closed by default. */
-    private val revealApprover: RevealApprover = DenyingRevealApprover
+    private val revealApprover: RevealApprover = DenyingRevealApprover,
+    /** Mask private/internal IPs even in SELECTIVE (internal topology). Default ON. */
+    maskPrivateIps: Boolean = true,
+    /** Internal DNS suffixes/hosts to mask. Default corporate suffixes. */
+    internalDomains: List<String> = Masker.DEFAULT_INTERNAL_DOMAINS
 ) {
     val vault = Vault()
     val dynamicTokens = DynamicTokenStore()
-    private val masker = Masker(vault, maskIpAddresses, maskUuids, maskingMode)
+    private val masker = Masker(vault, maskIpAddresses, maskUuids, maskingMode, maskPrivateIps, internalDomains)
     private val rehydrator = Rehydrator(vault, dynamicTokens)
     private val extractor = DynamicTokenExtractor(dynamicTokens, dynamicExtractorRules)
 

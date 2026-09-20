@@ -57,6 +57,17 @@ class McpConfig(storage: PersistedObject, private val logging: Logging) {
     // Blinder policy toggle. Default false = UUID identifiers are not masked (readable for analysis).
     var maskUuids by storage.boolean(false)
 
+    // Mask private/internal IPs (RFC1918/loopback/link-local/ULA) even in SELECTIVE. Default true.
+    var maskPrivateIps by storage.boolean(true)
+
+    // Internal DNS suffixes/hosts to mask (comma-separated). Default corporate suffixes.
+    private var internalDomainsRaw by storage.string("local,internal,corp,lan,intranet,home.arpa")
+    var internalDomains: List<String>
+        get() = internalDomainsRaw.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        set(value) {
+            internalDomainsRaw = value.joinToString(",")
+        }
+
     // Blinder masking mode (OFF/SELECTIVE/STRICT), persisted by name. Default STRICT: an honest
     // conceal-by-default posture for a security-critical tool (reveal is the escape hatch).
     private var maskingModeName by storage.string(MaskingMode.STRICT.name)

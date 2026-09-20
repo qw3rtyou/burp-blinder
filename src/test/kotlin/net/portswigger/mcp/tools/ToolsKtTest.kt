@@ -882,7 +882,7 @@ class ToolsKtTest {
         private fun mockInteraction(
             id: String,
             type: InteractionType,
-            clientIp: String = "10.0.0.1",
+            clientIp: String = "203.0.113.7",
             clientPort: Int = 54321,
             customData: String? = null,
             dnsDetails: DnsDetails? = null,
@@ -968,7 +968,7 @@ class ToolsKtTest {
                 assertTrue(text.contains("\"id\":\"int-001\""))
                 assertTrue(text.contains("\"type\":\"DNS\""))
                 assertTrue(text.contains("\"queryType\":\"A\""))
-                assertTrue(text.contains("\"clientIp\":\"10.0.0.1\""))
+                assertTrue(text.contains("\"clientIp\":\"203.0.113.7\""))
             }
 
             verify(exactly = 1) { collaboratorClient.getAllInteractions() }
