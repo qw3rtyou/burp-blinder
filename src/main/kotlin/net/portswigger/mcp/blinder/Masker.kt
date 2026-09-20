@@ -156,6 +156,7 @@ class Masker(
         text = maskFormKeys(text)
         text = maskJsonSensitiveValues(text)
         text = maskEscapedJsonSensitiveValues(text)
+        text = maskConfigKeyValues(text)
         text = maskNestedBase64(text)
         text = maskEmails(text)
         text = maskEncodedEmails(text)
@@ -379,6 +380,35 @@ class Masker(
     // (httpbin `data`, webhook/log/queue wrappers). Key-based masking must see `\"key\":\"value\"`
     // too. One level of escaping is handled; the value only is masked (escapes/structure preserved),
     // byte-exact round-trip.
+    // Generalised `key: value` (YAML / .properties / config). Line-based, requires `:` + whitespace
+    // (so `host:8080`, `scheme://`, `time: 10:30` shapes are not confused) and masks the value ONLY
+    // when the key is sensitive (never plain `name: foo`). Quotes/indent preserved, byte-exact.
+    private val configKeyValue = Regex("""(?m)^([ \t]*)([A-Za-z0-9_.\-]+)(:[ \t]+)(.*)$""")
+    private fun maskConfigKeyValues(text: String): String {
+        val skip = jwtRanges(text)
+        return configKeyValue.replace(text) { m ->
+            val indent = m.groupValues[1]
+            val key = m.groupValues[2]
+            val sep = m.groupValues[3]
+            val value = m.groupValues[4]
+            val type = sensitiveJsonValueType(key)
+            val overlaps = skip.any { it.first <= m.range.last && m.range.first <= it.last }
+            when {
+                type == null || value.isBlank() || overlaps || Placeholder.containsAny(value) -> m.value
+                else -> {
+                    val q = value.first()
+                    if ((q == '"' || q == '\'') && value.length >= 2 && value.last() == q) {
+                        val inner = value.substring(1, value.length - 1)
+                        if (inner.isBlank()) m.value
+                        else "$indent$key$sep$q${maskLiteral(inner, emptyList(), type)}$q"
+                    } else {
+                        "$indent$key$sep${maskLiteral(value, emptyList(), type)}"
+                    }
+                }
+            }
+        }
+    }
+
     private val escapedJsonPair = Regex("""(\\"([A-Za-z0-9_]+)\\"\s*:\s*\\")([^"\\]*)(\\")""")
     private fun maskEscapedJsonSensitiveValues(text: String) = escapedJsonPair.replace(text) { m ->
         val prefix = m.groupValues[1]
