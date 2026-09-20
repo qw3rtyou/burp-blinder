@@ -63,7 +63,7 @@ object SecretDetector {
     // Connection-string / URI userinfo `//user:password@host`. Requires the `//` authority marker
     // and a trailing `@`, so `http://host/a:b` (path colon, no userinfo) does not match. Group 1 is
     // the user, group 2 the password (masked). Works for postgres/mysql(jdbc)/mongodb/redis/amqp/ftp.
-    val URI_CREDENTIALS = Regex("""//([^\s:/@]+):([^\s/@]+)@""")
+    val URI_CREDENTIALS = Regex("""//([^\s:/@]*):([^\s/@]+)@""")
 
     /**
      * True if an IP literal is private/internal topology: RFC1918, loopback, link-local, or IPv6

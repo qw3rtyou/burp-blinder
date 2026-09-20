@@ -93,13 +93,22 @@ class Masker(
         "sessionid", "sessiontoken", "sid", "csrf", "xsrf", "otp", "pin", "secretkey", "privatekey",
         "creditcard", "cardnumber", "ssn"
     )
-    private val sensitiveKeySuffix = listOf("password", "passwd", "token", "secret", "apikey", "sessionid")
+    // Suffixes so prefixed env/config keys (DB_PASSWORD, MYSQL_ROOT_PASSWORD, API_SECRET,
+    // ACCESS_TOKEN, AWS_ACCESS_KEY, ...) are caught. All are unambiguous compounds — bare `key` is
+    // deliberately excluded to avoid public_key-style false positives.
+    private val sensitiveKeySuffix = listOf(
+        "password", "passwd", "token", "secret", "apikey", "sessionid",
+        "accesskey", "secretkey", "privatekey", "clientsecret"
+    )
 
     private fun normalizeKey(name: String): String = name.lowercase().replace(Regex("[-_]"), "")
 
     private fun isSensitiveParamKey(name: String): Boolean {
         val n = normalizeKey(name)
-        return n in sensitiveKeyExact || sensitiveKeySuffix.any { n.endsWith(it) }
+        if (n in sensitiveKeyExact || sensitiveKeySuffix.any { n.endsWith(it) }) return true
+        // `pass` only at a segment boundary (db_pass / db-pass / exact) — never inside bypass/compass.
+        val raw = name.lowercase()
+        return raw == "pass" || raw.endsWith("_pass") || raw.endsWith("-pass")
     }
 
     private fun paramKeyType(name: String): TokenType {
@@ -336,7 +345,8 @@ class Masker(
         val key = m.groupValues[2]
         val value = m.groupValues[3]
         val suffix = m.groupValues[4]
-        val type = sensitiveJsonKeys[key.lowercase()]
+        // Exact map first, then suffix matcher (DB_PASSWORD, API_SECRET, ACCESS_TOKEN, ...).
+        val type = sensitiveJsonKeys[key.lowercase()] ?: if (isSensitiveParamKey(key)) paramKeyType(key) else null
         when {
             type == null || value.isBlank() -> m.value
             // A JWT value carries analysis value (alg, claim keys). Defer it to the JWT pass so it
