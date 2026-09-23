@@ -141,6 +141,14 @@ class Masker(
 
     fun mask(input: String): String {
         if (mode == MaskingMode.OFF) return input
+        // JS/CSS recon usability (SELECTIVE only): headers get full masking, but the JS/CSS BODY gets
+        // a reduced pass (strong hardcoded-secret shapes only) so build hashes / minified tokens /
+        // JS property accesses are not over-masked. STRICT stays aggressive.
+        if (!strict && isJsCssContext(input)) return maskJsCss(input)
+        return maskFull(input)
+    }
+
+    private fun maskFull(input: String): String {
         var text = input
         text = maskPem(text)
         text = maskAuthorization(text)
@@ -175,6 +183,53 @@ class Masker(
         if (maskUuids || strict) text = maskUuidPass(text)
         text = maskHighEntropy(text)
         return text
+    }
+
+    // ---- JS/CSS reduced masking (SELECTIVE recon usability) --------------------------------------
+
+    private val jsCssContentType =
+        Regex("""(?im)^content-type:\s*(?:application|text)/(?:x-)?(?:javascript|ecmascript|css)\b""")
+    private val jsCssRequestPath = Regex("""(?im)^[A-Z]+\s+\S+\.(?:js|mjs|cjs|css)(?:[?#\s])""")
+
+    private fun isJsCssContext(text: String): Boolean =
+        jsCssContentType.containsMatchIn(text) || jsCssRequestPath.containsMatchIn(text)
+
+    private fun maskJsCss(text: String): String {
+        val markers = listOf("\r\n\r\n", "\n\n")
+        val idx = markers.mapNotNull { mrk -> text.indexOf(mrk).takeIf { it >= 0 }?.let { it + mrk.length } }.minOrNull()
+        return if (idx == null) maskStrongShapesOnly(text)
+        else maskFull(text.substring(0, idx)) + maskStrongShapesOnly(text.substring(idx))
+    }
+
+    // Only strong hardcoded-secret shapes — no card/phone/ssn/uuid/ip/host/high-entropy heuristics.
+    private fun maskStrongShapesOnly(text: String): String {
+        var t = text
+        t = maskPem(t)
+        t = maskUriCredentials(t)
+        t = maskJwts(t)
+        t = maskEmails(t)
+        t = maskStrongPrefixTokens(t)
+        t = maskBearerLiterals(t)
+        return t
+    }
+
+    private fun maskStrongPrefixTokens(text: String) =
+        replaceOutsidePlaceholders(text, SecretDetector.STRONG_TOKEN, jwtRanges(text)) { tok ->
+            vault.placeholderFor(tok, TokenType.SECRET)
+        }
+
+    private val bearerLiteral = Regex("""(?i)\b(Bearer|Basic)\s+([A-Za-z0-9._+/=\-]{8,})""")
+    private fun maskBearerLiterals(text: String): String {
+        val skip = Placeholder.parseAll(text).map { it.range } + jwtRanges(text)
+        return bearerLiteral.replace(text) { m ->
+            val overlaps = skip.any { it.first <= m.range.last && m.range.first <= it.last }
+            if (overlaps) m.value else {
+                val scheme = m.groupValues[1]
+                val tok = m.groupValues[2]
+                val type = if (scheme.equals("Basic", true)) TokenType.BASIC else TokenType.BEARER
+                "$scheme ${vault.placeholderFor(tok, type)}"
+            }
+        }
     }
 
     // MAC addresses — masked only in STRICT (aggressive, toggle-ignoring).
@@ -549,6 +604,12 @@ class Masker(
             protected = protected +
                     metadataHeaderValue.findAll(text).map { it.groups[1]!!.range } +
                     timePattern.findAll(text).map { it.range }
+        } else {
+            // SELECTIVE recon usability: build-hashed static asset paths and valid MIME tokens are
+            // not secrets (Parts 1 & 3).
+            protected = protected +
+                    SecretDetector.STATIC_ASSET_PATH.findAll(text).map { it.range } +
+                    SecretDetector.MIME_TOKEN.findAll(text).map { it.range }
         }
 
         val regex = if (strict) strictToken else isolatedToken

@@ -65,6 +65,26 @@ object SecretDetector {
     // the user, group 2 the password (masked). Works for postgres/mysql(jdbc)/mongodb/redis/amqp/ftp.
     val URI_CREDENTIALS = Regex("""//([^\s:/@]*):([^\s/@]+)@""")
 
+    // Strong hardcoded-secret shapes (unambiguous vendor prefixes) — masked even in JS/CSS bodies.
+    val STRONG_TOKEN = Regex(
+        """(?:sk_live_[A-Za-z0-9]{8,}|sk-[A-Za-z0-9]{16,}|rk_live_[A-Za-z0-9]{8,}|""" +
+            """ghp_[A-Za-z0-9]{20,}|gho_[A-Za-z0-9]{20,}|ghs_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|""" +
+            """AIza[A-Za-z0-9_\-]{20,}|AKIA[A-Z0-9]{12,}|xox[bpsoar]-[A-Za-z0-9\-]{8,})"""
+    )
+
+    // Static-asset path/filename: build-hashed asset names are not secrets (kept readable in SELECTIVE).
+    val STATIC_ASSET_PATH = Regex(
+        """[A-Za-z0-9_./\-]*\.(?:js|mjs|cjs|css|map|woff2?|ttf|otf|eot|png|jpe?g|gif|svg|webp|ico|avif)(?![A-Za-z0-9])""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // A valid MIME type token (application/xhtml+xml, application/vnd.*, text/css, ...) — not a secret.
+    // Restricted to real MIME top-level types so it never protects a `word/word` URL path segment.
+    val MIME_TOKEN = Regex(
+        """(?<![A-Za-z0-9])(?:application|text|image|audio|video|font|multipart|message|model)/[a-z0-9][a-z0-9.+\-]*(?![A-Za-z0-9])""",
+        RegexOption.IGNORE_CASE
+    )
+
     /**
      * True if an IP literal is private/internal topology: RFC1918, loopback, link-local, or IPv6
      * ULA/loopback/link-local. Public IPs return false (left readable unless the public-IP toggle
