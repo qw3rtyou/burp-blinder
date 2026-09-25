@@ -1,13 +1,13 @@
-Uuid: 9952290f04ed4f628e624d0aa9dccebc 
+Uuid: 9952290f04ed4f628e624d0aa9dccebc
 ExtensionType: 1
-Name: MCP Server
-RepoName: mcp-server
+Name: burp-blinder
+RepoName: burp-blinder
 ScreenVersion: 1.3.0
 SerialVersion: 10
 MinPlatformVersion: 26
 ProOnly: False
-Author: Daniel S, PortSwigger & Daniel Allen, PortSwigger
-ShortDescription: Integrate Burp Suite with AI Clients using the Model Context Protocol (MCP).
+Author: qw3rtyou (fork); based on Burp MCP Server by Daniel S & Daniel Allen, PortSwigger
+ShortDescription: Tokenization gateway for the Burp MCP server: masks secrets/PII the AI agent reads and re-injects real values before requests leave Burp.
 EntryPoint: burp-blinder-all.jar
 BuildCommand: ./gradlew embedProxyJar
 SupportedProducts: Pro, Community
