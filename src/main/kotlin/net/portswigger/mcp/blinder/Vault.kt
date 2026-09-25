@@ -20,6 +20,7 @@ enum class TokenType(val prefix: String) {
     SSN("SSN"),
     MAC("MAC"),
     IHOST("IHOST"),
+    PII("PII"),
     SECRET("SECRET");
 
     companion object {
@@ -61,6 +62,13 @@ class Vault {
     fun realFor(basePlaceholder: String): String? = synchronized(lock) { placeholderToReal[basePlaceholder] }
 
     fun knows(realValue: String): Boolean = synchronized(lock) { realToPlaceholder.containsKey(realValue) }
+
+    /**
+     * Snapshot of (real value -> base placeholder) pairs, for the post-pass reference-consistency
+     * scrub that replaces echoed occurrences of an already-vaulted secret. Read-only copy.
+     */
+    fun entries(): List<Pair<String, String>> =
+        synchronized(lock) { realToPlaceholder.entries.map { it.key to it.value } }
 
     fun size(): Int = synchronized(lock) { placeholderToReal.size }
 

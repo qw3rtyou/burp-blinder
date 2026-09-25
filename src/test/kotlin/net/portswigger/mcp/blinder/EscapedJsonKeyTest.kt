@@ -23,17 +23,17 @@ class EscapedJsonKeyTest {
 
     @Test
     fun `escaped json masks sensitive key only, non-sensitive preserved`() {
-        val out = mask("""{"body":"{\"api_secret\":\"sk_abc123\",\"username\":\"admin\"}"}""")
+        val out = mask("""{"body":"{\"api_secret\":\"sk_abc123\",\"label\":\"admin\"}"}""")
         assertFalse(out.contains("sk_abc123"), out)
         assertTrue(out.contains("""\"api_secret\":\"{{SECRET_1}}\""""), out)
-        assertTrue(out.contains("""\"username\":\"admin\""""), out)
+        assertTrue(out.contains("""\"label\":\"admin\""""), out)
     }
 
     @Test
     fun `plain json still masked (regression) and non-sensitive escaped key untouched`() {
         assertTrue(mask("""{"DB_PASSWORD":"Pr0dDbP4ss!"}""").contains("{{SECRET_1|j}}"))
-        val out = mask("""{"log":"{\"username\":\"admin\",\"note\":\"ok\"}"}""")
-        assertTrue(out.contains("""\"username\":\"admin\""""), out)
+        val out = mask("""{"log":"{\"label\":\"admin\",\"note\":\"ok\"}"}""")
+        assertTrue(out.contains("""\"label\":\"admin\""""), out)
         assertFalse(out.contains("{{SECRET"), out)
     }
 

@@ -80,7 +80,29 @@ class Masker(
         "cardnumber" to TokenType.CARD,
         "card_number" to TokenType.CARD,
         "creditcard" to TokenType.CARD,
-        "credit_card" to TokenType.CARD
+        "credit_card" to TokenType.CARD,
+        // Account PII by key name (value masked regardless of shape — user_id is a UUID the entropy
+        // pass leaves readable; the display names are free-text). Specific compound keys only, so a
+        // plain `name` field is not over-masked.
+        "user_id" to TokenType.PII,
+        "userid" to TokenType.PII,
+        "account_id" to TokenType.PII,
+        "accountid" to TokenType.PII,
+        // Display / real names and login handles. These keys carry user-identifying data (a real name
+        // like Google's, or a handle); real-world traffic can leak a real name via `userName` and
+        // `externalAccountName`. `username`/`userName` collapse to one lowercased key, so a handle in a
+        // JSON body is masked too — reference consistency still lets the agent reason same/different
+        // (IDOR) via distinct placeholders. Query/form `username` params are NOT affected (separate path).
+        "user_name" to TokenType.PII,
+        "username" to TokenType.PII,
+        "account_name" to TokenType.PII,
+        "accountname" to TokenType.PII,
+        "externalaccountname" to TokenType.PII,
+        "displayname" to TokenType.PII,
+        "fullname" to TokenType.PII,
+        "realname" to TokenType.PII,
+        "nickname" to TokenType.PII,
+        "nick_name" to TokenType.PII
     )
 
     // Sensitive parameter/form key names, matched on a normalized form (lowercased, `-`/`_` removed)
@@ -97,7 +119,7 @@ class Masker(
     // ACCESS_TOKEN, AWS_ACCESS_KEY, ...) are caught. All are unambiguous compounds — bare `key` is
     // deliberately excluded to avoid public_key-style false positives.
     private val sensitiveKeySuffix = listOf(
-        "password", "passwd", "token", "secret", "apikey", "sessionid",
+        "password", "passwd", "token", "secret", "apikey", "sessionid", "session",
         "accesskey", "secretkey", "privatekey", "clientsecret", "accountkey"
     )
 
@@ -144,8 +166,28 @@ class Masker(
         // JS/CSS recon usability (SELECTIVE only): headers get full masking, but the JS/CSS BODY gets
         // a reduced pass (strong hardcoded-secret shapes only) so build hashes / minified tokens /
         // JS property accesses are not over-masked. STRICT stays aggressive.
-        if (!strict && isJsCssContext(input)) return maskJsCss(input)
-        return maskFull(input)
+        val masked = if (!strict && isJsCssContext(input)) maskJsCss(input) else maskFull(input)
+        // Final reference-consistency scrub: propagate decisions already made (a value in the vault
+        // was judged sensitive by a key/shape pass) to any verbatim echo of that value elsewhere in
+        // the output (e.g. a user_id repeated inside a profile-image URL). It never classifies by
+        // value shape, so it cannot mistake a benign random hash for a secret.
+        return scrubKnownSecrets(masked)
+    }
+
+    // Only values at least this long are scrubbed, so a short vaulted value (e.g. a masked "0" or a
+    // 4-digit code) can never blanket-replace unrelated text.
+    private val minScrubLength = 16
+
+    private fun scrubKnownSecrets(text: String): String {
+        val entries = vault.entries().filter { it.first.length >= minScrubLength }
+        if (entries.isEmpty()) return text
+        var out = text
+        // Longest first: a value containing another is replaced before its substring.
+        for ((real, placeholder) in entries.sortedByDescending { it.first.length }) {
+            if (!out.contains(real)) continue
+            out = replaceOutsidePlaceholders(out, Regex(Regex.escape(real))) { placeholder }
+        }
+        return out
     }
 
     private fun maskFull(input: String): String {
@@ -155,6 +197,10 @@ class Masker(
         text = maskApiKeyHeaders(text)
         text = maskCookieHeader(text)
         text = maskSetCookieHeader(text)
+        // Session/auth ids echoed as their own headers (x-session-id, x-session-token, ...). Scoped to an
+        // explicit header-name list, so it never touches unrelated key=value text.
+        text = maskSessionHeadersAnywhere(text)
+        text = maskIdentityHeadersAnywhere(text)
         text = maskUriCredentials(text)
         // JWTs are converted to their selective analysis view BEFORE the nested/base64 and
         // high-entropy passes, which would otherwise hijack/clobber the base64url segments and
@@ -320,33 +366,76 @@ class Masker(
         "${m.groupValues[1]}:${m.groupValues[2]}${maskLiteral(m.groupValues[3].trim(), emptyList(), TokenType.APIKEY)}${m.groupValues[4]}"
     }
 
-    private val cookieHeader = Regex("""(?im)^(cookie):([ \t]*)(.+?)([ \t]*)$""")
+    // Line boundary that works for real HTTP (CR/LF) AND for messages embedded as escaped-JSON strings
+    // (get_proxy_http_history output, whose `\r\n` are literal backslash-r-backslash-n, not newlines).
+    // Matched as a group and re-emitted verbatim; the header value classes below exclude `\` so a match
+    // stops at the leading backslash of the next escaped newline (or a real CR/LF), never running on
+    // into the following headers/body. Escaped alternatives come first (longest-match).
+    private val LINE_BOUNDARY = """(\\r\\n|\\n|\r\n|\r|\n|^)"""
+
+    private val cookieHeader = Regex("""(?i)$LINE_BOUNDARY([ \t]*)(cookie):([ \t]*)([^\r\n\\]+)""")
     private fun maskCookieHeader(text: String) = cookieHeader.replace(text) { m ->
-        val rebuilt = m.groupValues[3].split(";").joinToString(";") { part ->
+        val rebuilt = m.groupValues[5].split(";").joinToString(";") { part ->
             val eq = part.indexOf('=')
             if (eq <= 0) return@joinToString part
             val leading = part.takeWhile { it == ' ' }
             val name = part.substring(0, eq).trim()
             val value = part.substring(eq + 1)
             // STRICT masks every cookie value; SELECTIVE only sensitive-named cookies.
-            if (value.isNotBlank() && (strict || SecretDetector.isSensitiveCookieName(name))) {
+            if (value.isNotBlank() && !Placeholder.containsAny(value) &&
+                (strict || SecretDetector.isSensitiveCookieName(name))
+            ) {
                 val type = if (name.lowercase().let { it.contains("sess") || it.contains("sid") })
                     TokenType.COOKIE_SESSION else TokenType.COOKIE
                 "$leading$name=${maskLiteral(value.trim(), emptyList(), type)}"
             } else part
         }
-        "${m.groupValues[1]}:${m.groupValues[2]}$rebuilt${m.groupValues[4]}"
+        "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]}:${m.groupValues[4]}$rebuilt"
     }
 
-    private val setCookieHeader = Regex("""(?im)^(set-cookie):([ \t]*)([^=;\r\n]+)=([^;\r\n]+)(.*)$""")
+    private val setCookieHeader =
+        Regex("""(?i)$LINE_BOUNDARY([ \t]*)(set-cookie):([ \t]*)([^=;\r\n\\]+)=([^;\r\n\\]+)([^\r\n\\]*)""")
     private fun maskSetCookieHeader(text: String) = setCookieHeader.replace(text) { m ->
-        val name = m.groupValues[3].trim()
-        val value = m.groupValues[4]
-        if (strict || SecretDetector.isSensitiveCookieName(name)) {
+        val name = m.groupValues[5].trim()
+        val value = m.groupValues[6]
+        if ((strict || SecretDetector.isSensitiveCookieName(name)) && !Placeholder.containsAny(value)) {
             val type = if (name.lowercase().let { it.contains("sess") || it.contains("sid") })
                 TokenType.COOKIE_SESSION else TokenType.COOKIE
-            "${m.groupValues[1]}:${m.groupValues[2]}${m.groupValues[3]}=${maskLiteral(value, emptyList(), type)}${m.groupValues[5]}"
+            "${m.groupValues[1]}${m.groupValues[2]}${m.groupValues[3]}:${m.groupValues[4]}${m.groupValues[5]}=${
+                maskLiteral(value, emptyList(), type)
+            }${m.groupValues[7]}"
         } else m.value
+    }
+
+    // Session/auth identifiers echoed as response headers (x-session-id, x-session-token, ...). Same escaped-
+    // JSON blind spot as cookies, and the value is often a UUID the entropy pass deliberately leaves
+    // readable. Conservative explicit name list to avoid masking unrelated `x-*` metadata headers.
+    // The header name sits at a line start, which in escaped-JSON content is the trailing `n` of a
+    // literal `\r\n` — a letter — so a negative lookbehind would wrongly reject it. Match the boundary
+    // (escaped `\r\n`/`\n`, a real CR/LF, or string start) as a group and re-emit it verbatim.
+    private val sessionHeaderAnywhere =
+        Regex("""(?i)$LINE_BOUNDARY([ \t]*)(x-session-id|x-session-token|x-auth-token|x-csrf-token|x-xsrf-token)(:[ \t]*)([^;,\s"'\\{}]+)""")
+    private fun maskSessionHeadersAnywhere(text: String) =
+        maskHeaderValueByName(text, sessionHeaderAnywhere, TokenType.COOKIE_SESSION)
+
+    // Account-identity headers (X-UserId / X-User-Id). Same escaped-JSON blind spot; the value is a
+    // UUID the entropy pass leaves readable. Explicit name list -> no collateral masking.
+    private val identityHeaderAnywhere =
+        Regex("""(?i)$LINE_BOUNDARY([ \t]*)(x-user-?id)(:[ \t]*)([^;,\s"'\\{}]+)""")
+    private fun maskIdentityHeadersAnywhere(text: String) =
+        maskHeaderValueByName(text, identityHeaderAnywhere, TokenType.PII)
+
+    // Shared driver for the boundary-aware header-value passes above: group1=boundary, 2=indent,
+    // 3=name, 4=`:`+spaces, 5=value. Boundary/name/separator re-emitted verbatim; only the value masks.
+    private fun maskHeaderValueByName(text: String, regex: Regex, type: TokenType): String {
+        val skip = Placeholder.parseAll(text).map { it.range } + jwtRanges(text)
+        return regex.replace(text) { m ->
+            val overlaps = skip.any { it.first <= m.range.last && m.range.first <= it.last }
+            val value = m.groupValues[5]
+            if (overlaps || value.isBlank() || Placeholder.containsAny(value)) m.value
+            else m.groupValues[1] + m.groupValues[2] + m.groupValues[3] + m.groupValues[4] +
+                maskLiteral(value, emptyList(), type)
+        }
     }
 
     // Request-line query params: GET /path?a=b&c=d HTTP/1.1

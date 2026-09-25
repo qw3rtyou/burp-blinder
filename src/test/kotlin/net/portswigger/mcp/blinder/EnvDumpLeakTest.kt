@@ -47,11 +47,11 @@ class EnvDumpLeakTest {
 
     @Test
     fun `similar-but-non-secret keys are not masked (no false positives)`() {
-        val out = mask("""{"bypass":"true","compass":"north","public_key":"pk-abc","username":"admin","keyboard":"qwerty"}""")
+        // NB: `username` is no longer here — it now masks as PII (see EscapedHistoryCookieLeakTest).
+        val out = mask("""{"bypass":"true","compass":"north","public_key":"pk-abc","keyboard":"qwerty"}""")
         assertTrue(out.contains("\"bypass\":\"true\""), out)
         assertTrue(out.contains("\"compass\":\"north\""), out)
         assertTrue(out.contains("\"public_key\":\"pk-abc\""), out)
-        assertTrue(out.contains("\"username\":\"admin\""), out)
         assertTrue(out.contains("\"keyboard\":\"qwerty\""), out)
         assertFalse(out.contains("{{"), out)
     }
