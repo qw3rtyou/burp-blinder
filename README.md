@@ -1,148 +1,166 @@
-# Burp Suite MCP Server Extension
+# burp-blinder
 
-## Overview
+**A bidirectional tokenization gateway for the [Burp Suite MCP server](https://github.com/PortSwigger/mcp-server).**
 
-Integrate Burp Suite with AI Clients using the Model Context Protocol (MCP).
+When an AI agent drives Burp Suite over MCP, everything the agent reads — proxy
+history, repeater responses, request/response bodies — normally flows verbatim to
+the model. burp-blinder sits in that path: data the agent **reads** is masked to
+placeholders, the real values are kept in an in-process vault, and they are
+**re-injected before the request leaves Burp**. Requests still work; the model
+never sees the real secrets.
 
-For more information about the protocol visit: [modelcontextprotocol.io](https://modelcontextprotocol.io/)
+```
+                 read tools (history, responses)
+   Burp  ──────────────────────────────────────▶  [ mask ]  ──▶  AI agent
+    ▲                                                 │              (sees placeholders)
+    │                                              [ vault ]
+    │            send tools (repeater, egress)        │
+    └──────────────────────────────────────────  [ rehydrate ]  ◀──┘
+                                                                 (real values re-injected)
+```
 
-## Features
+> ℹ️ **This is a modified fork.** burp-blinder is based on
+> [`PortSwigger/mcp-server`](https://github.com/PortSwigger/mcp-server) and is
+> distributed under the **GNU GPL-3.0** (see [Licence](#licence)). The blinder
+> tokenization gateway (masking, vault, rehydration, dynamic-token capture, the
+> human-gated reveal, and the deny-by-default tool decorator) was added on top of
+> upstream in 2026. All upstream MCP-server functionality is preserved.
 
-- Connect Burp Suite to AI clients through MCP
-- Automatic installation for Claude Desktop
-- Comes with packaged Stdio MCP proxy server
+## Why
 
-## Usage
+The goal is to make it safe to use a **capable external/frontier model** for Burp
+traffic analysis without handing it your credentials, PII, or internal topology.
+You keep frontier-model quality; secrets never leave your machine in cleartext.
 
-- Install the extension in Burp Suite
-- Configure your Burp MCP server in the extension settings
-- Configure your MCP client to use the Burp SSE MCP server or stdio proxy
-- Interact with Burp through your client!
+- **Minimal-necessity:** structure is preserved (HTTP method, paths, header names,
+  JSON keys, status lines) so the model can still reason about the traffic — only
+  the *sensitive* parts are replaced.
+- **Referential consistency:** the same real value always maps to the same
+  placeholder, so relationships (e.g. a session reused across requests) survive
+  masking and the agent can still spot IDOR-style patterns.
+- **Human-gated disclosure:** the agent can request a real value via
+  `reveal_placeholder`, but it is returned **only** after an explicit human
+  approval in a Burp dialog — fail-closed and audit-logged.
+- **Deny-by-default:** every MCP tool passes through a single decorator; a tool is
+  only reachable if it has been classified (read → masked, send → rehydrated).
+
+## What gets masked
+
+Credentials (Cookie/Set-Cookie, Bearer/Basic, API-key headers, connection-string
+passwords, PEM keys), shape-based secrets (JWT, `ghp_…`/`sk_live_…`/`xoxb-…`/AWS/…,
+including secrets nested inside base64 / `data:` / percent-encoding), PII (emails,
+phone numbers, Luhn-valid cards, SSN, IBAN, wallets), and sensitive keys in form /
+JSON / query / YAML / XML / ADO.NET syntaxes. Identifiers (IP / UUID / MAC) are
+mode-dependent.
+
+**See [MASKING.md](MASKING.md) for the full, current list, the masking modes, and
+the scope / limitations.**
+
+### Masking modes (`MCP` tab dropdown, switchable at runtime)
+
+| Mode | Behaviour |
+|------|-----------|
+| **OFF** | No masking — pass-through (rehydration is a no-op). |
+| **SELECTIVE** (default) | Masks detected secrets and PII; leaves IP / UUID / MAC readable. |
+| **STRICT** | Also masks IP / UUID / MAC; still preserves readable structure. |
+
+## Architecture
+
+The gateway core lives in `net.portswigger.mcp.blinder.*` and is **pure Kotlin with
+no Montoya dependency**, so masking / vault / rehydration / detection are covered by
+a headless test suite (277 tests). Montoya integration is isolated to
+`blinder/montoya/BlinderHttpHandler.kt` + `ExtensionBase.kt`, and the MCP wiring to
+a single deny-by-default decorator in `tools/GatewayTool.kt`.
 
 ## Installation
 
-### Prerequisites
+### Option A — download the release (no build)
 
-Ensure that the following prerequisites are met before building and installing the extension:
+Grab `burp-blinder-all.jar` from the [Releases](../../releases) page and load it in
+Burp (see [Loading into Burp](#loading-the-extension-into-burp-suite)).
 
-1. **Java**: Java must be installed and available in your system's PATH. You can verify this by running `java --version` in your terminal.
-2. **jar Command**: The `jar` command must be executable and available in your system's PATH. You can verify this by running `jar --version` in your terminal. This is required for building and installing the extension.
+### Option B — build from source
 
-### Building the Extension
+**Prerequisites:** Java on your `PATH` (`java --version`) and the `jar` command
+(`jar --version`).
 
-1. **Clone the Repository**: Obtain the source code for the MCP Server Extension.
-   ```
-   git clone https://github.com/PortSwigger/mcp-server.git
-   ```
+```bash
+git clone https://github.com/qw3rtyou/burp-blinder.git
+cd burp-blinder
+./gradlew embedProxyJar
+```
 
-2. **Navigate to the Project Directory**: Move into the project's root directory.
-   ```
-   cd mcp-server
-   ```
+The extension is built to `build/libs/burp-blinder-all.jar`.
 
-3. **Build the JAR File**: Use Gradle to build the extension.
-   ```
-   ./gradlew embedProxyJar
-   ```
+Run the tests with `./gradlew test` (run `embedProxyJar` and `test` as separate
+invocations).
 
-   This command compiles the source code and packages it into a JAR file located in `build/libs/burp-mcp-all.jar`.
+### Loading the extension into Burp Suite
 
-### Loading the Extension into Burp Suite
-
-1. **Open Burp Suite**: Launch your Burp Suite application.
-2. **Access the Extensions Tab**: Navigate to the `Extensions` tab.
-3. **Add the Extension**:
-    - Click on `Add`.
-    - Set `Extension Type` to `Java`.
-    - Click `Select file ...` and choose the JAR file built in the previous step.
-    - Click `Next` to load the extension.
-
-Upon successful loading, the MCP Server Extension will be active within Burp Suite.
+1. Open Burp Suite and go to the **Extensions** tab.
+2. Click **Add**, set **Extension Type** to **Java**.
+3. **Select file …** → choose `burp-blinder-all.jar` → **Next**.
 
 ## Configuration
 
-### Configuring the Extension
-Configuration for the extension is done through the Burp Suite UI in the `MCP` tab.
-- **Toggle the MCP Server**: The `Enabled` checkbox controls whether the MCP server is active.
-- **Enable config editing**: The `Enable tools that can edit your config` checkbox allows the MCP server to expose tools which can edit Burp configuration files.
-- **Advanced options**: You can configure the port and host for the MCP server. By default, it listens on `http://127.0.0.1:9876`.
+Configure the extension in Burp's **MCP** tab:
 
-### Claude Desktop Client
+- **Enabled** — toggles the MCP server.
+- **Masking mode** — OFF / SELECTIVE / STRICT dropdown (switchable at runtime).
+- **Enable tools that can edit your config** — exposes config-editing MCP tools.
+- **Advanced** — server host/port. Default: `http://127.0.0.1:9876`.
 
-To fully utilize the MCP Server Extension with Claude, you need to configure your Claude client settings appropriately.
-The extension has an installer which will automatically configure the client settings for you.
+### Connecting an MCP client
 
-1. Currently, Claude Desktop only support STDIO MCP Servers
-   for the service it needs.
-   This approach isn't ideal for desktop apps like Burp, so instead, Claude will start a proxy server that points to the
-   Burp instance,  
-   which hosts a web server at a known port (`localhost:9876`).
+Point your MCP client at the SSE server:
 
-2. **Configure Claude to use the Burp MCP server**  
-   You can do this in one of two ways:
-
-    - **Option 1: Run the installer from the extension**
-      This will add the Burp MCP server to the Claude Desktop config.
-
-    - **Option 2: Manually edit the config file**  
-      Open the file located at `~/Library/Application Support/Claude/claude_desktop_config.json`,
-      and replace or update it with the following:
-      ```json
-      {
-        "mcpServers": {
-          "burp": {
-            "command": "<path to Java executable packaged with Burp>",
-            "args": [
-                "-jar",
-                "/path/to/mcp/proxy/jar/mcp-proxy-all.jar",
-                "--sse-url",
-                "<your Burp MCP server URL configured in the extension>"
-            ]
-          }
-        }
-      }
-      ```
-
-3. **Restart Claude Desktop** - assuming Burp is running with the extension loaded.
-
-## Manual installations
-If you want to install the MCP server manually you can either use the extension's SSE server directly or the packaged
-Stdio proxy server.
-
-### SSE MCP Server
-To use the SSE server directly, provide the configured server URL to your MCP client:
 ```
 http://127.0.0.1:9876
 ```
 
-### Stdio MCP Proxy Server
-The source code for the proxy server can be found here: [MCP Proxy Server](https://github.com/PortSwigger/mcp-proxy)
+For clients that only support stdio (e.g. Claude Desktop), the extension ships a
+packaged stdio proxy. Use the extension's installer to write the client config, or
+configure it manually:
 
-In order to support MCP Clients which only support Stdio MCP Servers, the extension comes packaged with a proxy server for
-passing requests to the SSE MCP server extension.
-
-If you want to use the Stdio proxy server you can use the extension's installer option to extract the proxy server jar.
-Once you have the jar you can add the following command and args to your client configuration:
-```
-/path/to/packaged/burp/java -jar /path/to/proxy/jar/mcp-proxy-all.jar --sse-url http://127.0.0.1:9876
-```
-
-If you modify the proxy source, rebuild and copy it into this project before packaging the extension:
-```bash
-# From mcp-proxy
-./gradlew shadowJar
-cp build/libs/mcp-proxy-all.jar /path/to/mcp-server/libs/mcp-proxy-all.jar
-
-# From mcp-server
-./gradlew embedProxyJar
+```json
+{
+  "mcpServers": {
+    "burp": {
+      "command": "<path to the Java executable packaged with Burp>",
+      "args": [
+        "-jar",
+        "/path/to/proxy/jar/mcp-proxy-all.jar",
+        "--sse-url",
+        "http://127.0.0.1:9876"
+      ]
+    }
+  }
+}
 ```
 
-### Creating / modifying tools
+Then restart the client (with Burp running and the extension loaded). The stdio
+proxy source is at [PortSwigger/mcp-proxy](https://github.com/PortSwigger/mcp-proxy).
 
-Tools are defined in `src/main/kotlin/net/portswigger/mcp/tools/Tools.kt`. To define new tools, create a new serializable
-data class with the required parameters which will come from the LLM.
+## Scope & limitations
 
-The tool name is auto-derived from its parameters data class. A description is also needed for the LLM. You can return
-a string or a `List<ContentBlock>` to provide data back to the LLM.
+burp-blinder targets the **external-model** case. For a fully-isolated local model
+with no logging and no downstream tools its leak-prevention value is marginal (by
+design). It does **not** mask source-code logic — you cannot hide logic and still
+have the agent analyze it — only *incidental* secrets embedded in code. See the
+[Scope section of MASKING.md](MASKING.md#scope--when-to-use) for the full picture,
+and the project notes for residual items still pending real-environment validation
+(HTTP/2 delayed-egress reconstruction, per-site dynamic-token tuning).
 
-Extend the Paginated interface to add auto-pagination support.
+## Licence
+
+burp-blinder is distributed under the **GNU General Public License v3.0**, the same
+licence as its upstream. See [LICENSE](LICENSE).
+
+- Upstream: [`PortSwigger/mcp-server`](https://github.com/PortSwigger/mcp-server)
+  — © PortSwigger (Daniel S, Daniel Allen). All rights in the upstream code remain
+  with the original authors.
+- Modifications (the blinder gateway) © 2026 the burp-blinder contributors, added on
+  top of upstream and released under GPL-3.0.
+
+Because this is GPL-3.0 software, any distribution must keep the source available
+and retain the GPL-3.0 licence.

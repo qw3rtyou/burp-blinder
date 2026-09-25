@@ -1,0 +1,38 @@
+burp-blinder
+Copyright (C) 2026 the burp-blinder contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 3, as published by the Free
+Software Foundation. See the LICENSE file for the full licence text.
+
+-------------------------------------------------------------------------------
+Based on upstream work
+-------------------------------------------------------------------------------
+
+This project is a modified fork of:
+
+    Burp Suite MCP Server
+    https://github.com/PortSwigger/mcp-server
+    Copyright (C) PortSwigger (Daniel S, Daniel Allen)
+    Licensed under the GNU General Public License version 3.
+
+All rights in the upstream code remain with its original authors. The upstream
+MCP-server functionality is preserved in this fork.
+
+-------------------------------------------------------------------------------
+Modifications made in this fork (2026)
+-------------------------------------------------------------------------------
+
+Added the "blinder" bidirectional tokenization gateway on top of upstream:
+
+  * masking of secrets / PII / credentials in data read through MCP tools
+    (package net.portswigger.mcp.blinder.*)
+  * an in-process vault holding the real values
+  * rehydration that re-injects real values before requests leave Burp
+  * dynamic-token (e.g. CSRF) live capture and injection via an HTTP handler
+  * a human-gated reveal_placeholder tool (fail-closed, audit-logged)
+  * a single deny-by-default MCP tool decorator (tools/GatewayTool.kt)
+  * masking-mode configuration (OFF / SELECTIVE / STRICT)
+
+These modifications are also licensed under the GNU General Public License
+version 3.
